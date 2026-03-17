@@ -1,0 +1,134 @@
+<svg width="930" height="420" viewBox="0 0 930 420" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }
+    .phase { font-size: 13px; font-weight: 600; fill: #1A1A1A; }
+    .sub { font-size: 11px; fill: #9B9490; }
+    .label { font-size: 12px; fill: #4A5F7F; }
+    .small { font-size: 10px; fill: #9B9490; }
+
+    .diamond-left { fill: #FAF8F5; stroke: #4A5F7F; stroke-width: 2; }
+    .diamond-right { fill: #FAF8F5; stroke: #B8794E; stroke-width: 2; }
+    .panel { fill: #FFFFFF; stroke: #E8E6E3; stroke-width: 1.5; }
+
+    .alertCircle { fill: #B8736E; }
+    .successCircle { fill: #5A8A6C; }
+    .iconText {
+      fill: #FFFFFF;
+      font-size: 16px;
+      font-weight: 700;
+      dominant-baseline: middle;
+      text-anchor: middle;
+    }
+
+    /* Timeline:
+       0.0s-0.4s   - Challenge box fades in
+       0.5s-2.8s   - White cover slides right, revealing diamonds
+       0.5s-2.8s   - Arrow line draws from left to right (synced with cover)
+       2.8s        - Arrow head appears
+       2.9s-3.3s   - Solution box fades in
+    */
+
+    /* Challenge box - appears first */
+    .challenge-group {
+      opacity: 0;
+      animation: fadeIn 0.4s ease-out 0s forwards;
+    }
+
+    /* White cover that slides to reveal content */
+    .reveal-cover {
+      fill: #FFFFFF;
+      animation: slideRight 2.3s ease-in-out 0.5s forwards;
+    }
+
+    /* Arrow line - draws after rectangle finishes */
+    .spine {
+      stroke: #1A1A1A;
+      stroke-width: 2;
+      fill: none;
+      stroke-dasharray: 620;
+      stroke-dashoffset: 620;
+      animation: drawLine 1.5s ease-in-out 2.8s forwards;
+    }
+
+    /* Arrow head - appears when line completes */
+    .arrow {
+      fill: #1A1A1A;
+      opacity: 0;
+      animation: fadeIn 0.15s ease-out 4.3s forwards;
+    }
+
+    /* Solution box - appears after arrow completes */
+    .solution-group {
+      opacity: 0;
+      animation: fadeIn 0.4s ease-out 4.4s forwards;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideRight {
+      from { transform: translateX(0); }
+      to { transform: translateX(800px); }
+    }
+
+    @keyframes drawLine {
+      to { stroke-dashoffset: 0; }
+    }
+  </style>
+
+  <!-- Arrow line - draws behind diamonds, from challenge to solution -->
+  <line x1="150" y1="210" x2="770" y2="210" class="spine"/>
+  <polygon points="770,210 755,202 755,218" class="arrow"/>
+
+  <!-- Diamond 1: Discover + Define (Problem Space) - static, revealed by cover -->
+  <polygon points="200,210 330,60 460,210 330,360" class="diamond-left"/>
+
+  <!-- Diamond 2: Develop + Deliver (Solution Space) - static, revealed by cover -->
+  <polygon points="460,210 590,60 720,210 590,360" class="diamond-right"/>
+
+  <!-- Phase labels - static, revealed by cover -->
+  <text x="265" y="45" text-anchor="middle" class="phase">DISCOVER</text>
+  <text x="265" y="60" text-anchor="middle" class="sub">(Diverge)</text>
+  <text x="265" y="202" text-anchor="middle" class="label">Research</text>
+  <text x="265" y="220" text-anchor="middle" class="label">Observe</text>
+
+  <text x="395" y="45" text-anchor="middle" class="phase">DEFINE</text>
+  <text x="395" y="60" text-anchor="middle" class="sub">(Converge)</text>
+  <text x="395" y="202" text-anchor="middle" class="label">Define problem</text>
+  <text x="395" y="220" text-anchor="middle" class="label">Success criteria</text>
+
+  <text x="525" y="45" text-anchor="middle" class="phase">DEVELOP</text>
+  <text x="525" y="60" text-anchor="middle" class="sub">(Diverge)</text>
+  <text x="525" y="202" text-anchor="middle" class="label">Prototype</text>
+  <text x="525" y="220" text-anchor="middle" class="label">Iterate</text>
+
+  <text x="655" y="45" text-anchor="middle" class="phase">DELIVER</text>
+  <text x="655" y="60" text-anchor="middle" class="sub">(Converge)</text>
+  <text x="655" y="202" text-anchor="middle" class="label">Validate</text>
+  <text x="655" y="220" text-anchor="middle" class="label">Release</text>
+
+  <!-- White cover that slides right to reveal diamonds -->
+  <rect x="150" y="0" width="620" height="420" class="reveal-cover"/>
+
+  <!-- Left panel: Challenge (appears first, on top) -->
+  <g class="challenge-group">
+    <rect x="20" y="150" width="130" height="120" rx="8" class="panel"/>
+    <text x="85" y="195" text-anchor="middle" class="phase">CHALLENGE</text>
+    <text x="85" y="215" text-anchor="middle" class="small">Don't Know</text>
+    <text x="85" y="230" text-anchor="middle" class="small">Could Be</text>
+    <circle cx="158" cy="144" r="14" class="alertCircle"/>
+    <text x="158" y="145" class="iconText">?</text>
+  </g>
+
+  <!-- Right panel: Solution (appears at end) -->
+  <g class="solution-group">
+    <rect x="770" y="150" width="130" height="120" rx="8" class="panel"/>
+    <text x="835" y="195" text-anchor="middle" class="phase">SOLUTION</text>
+    <text x="835" y="215" text-anchor="middle" class="small">Do Know</text>
+    <text x="835" y="230" text-anchor="middle" class="small">Should Be</text>
+    <circle cx="908" cy="144" r="14" class="successCircle"/>
+    <text x="908" y="145" class="iconText">✓</text>
+  </g>
+</svg>

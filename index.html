@@ -1,0 +1,3907 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+FUTURE IMPROVEMENTS - Technical Debt & Enhancement Backlog
+================================================================================
+
+This section documents planned improvements for future iterations.
+
+PRIORITY 1: Reduce !important Declarations
+──────────────────────────────────────────
+Current state: ~99 !important declarations, primarily in tooltip system.
+
+Root cause: Tooltip components require high specificity to override inherited
+styles from parent containers (pills, badges, cards) and ensure consistent
+positioning across different contexts.
+
+Proposed solution:
+- Introduce BEM methodology for tooltip components (.tooltip, .tooltip__content,
+  .tooltip__arrow, .tooltip--above, .tooltip--below)
+- Use CSS layers (@layer) to manage specificity without !important
+- Refactor tooltip styles into a dedicated layer with lower base specificity
+- Estimated reduction: 70-80% of !important declarations
+
+Trade-off consideration: Current approach works reliably across browsers.
+Refactoring would improve maintainability but requires thorough cross-browser
+testing of tooltip positioning.
+
+
+PRIORITY 2: CSS Architecture
+────────────────────────────
+- Consider extracting critical CSS for above-the-fold content
+- Evaluate CSS containment (contain: layout) for tooltip performance
+- Add print stylesheet for PDF generation consistency
+
+
+PRIORITY 3: Accessibility Enhancements
+──────────────────────────────────────
+- Add skip-to-content link for keyboard navigation
+- Ensure all tooltips are keyboard-accessible (focusable triggers)
+- Add aria-describedby for tooltip associations
+- Test with screen readers (NVDA, VoiceOver)
+
+
+PRIORITY 4: Performance
+───────────────────────
+- Lazy-load images below the fold
+- Consider CSS-only tooltip approach to reduce JavaScript dependency
+- Evaluate critical rendering path optimisation
+
+
+Last reviewed: January 2026
+================================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.5, minimum-scale=0.5">
+    <meta name="description" content="Professional CV for Steve Gosselin">
+    <meta name="author" content="Steve Gosselin">
+    <meta name="theme-color" content="#B8794E">
+    <title>Steve Gosselin - Analytics Engineer — Data Modelling</title>
+    <style>
+/* ==================== CSS CUSTOM PROPERTIES ==================== */
+/*
+ * Design System Variables
+ *
+ * Single source of truth for brand colours, typography, spacing, and UI values.
+ * See brand_style_guide.html for full design documentation.
+ *
+ * Usage:
+ * - Colors: var(--color-warm-copper), var(--color-slate-blue), etc.
+ * - Spacing: var(--space-sm), var(--space-md), etc. (8-point grid)
+ * - Typography: var(--font-size-h1), var(--font-weight-bold), etc.
+ * - Z-index: var(--z-tooltip-content), var(--z-overlay), etc. (see hierarchy below)
+ */
+:root {
+  /* Brand Colours - Core */
+  --color-ink-black: #1A1A1A;
+  --color-warm-copper: #B8794E;
+  --color-warm-white: #FAF8F5;
+  --color-slate-blue: #4A5F7F;
+
+  /* Brand Colours - Functional */
+  --color-jade-green: #5A8A6C;
+  --color-burnt-sienna: #B8736E;
+  --color-taupe: #A8A19E;
+
+  /* Brand Colours - Supporting */
+  --color-pure-white: #FFFFFF;
+  --color-stone: #F5F3F0;
+  --color-pebble: #E8E6E3;
+  --color-warm-grey: #9B9490;
+
+  /* UI-Specific Colours */
+  --color-linkedin-blue: #0A66C2;
+
+  /* Typography - Fonts */
+  --font-stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+
+  /* Typography - Sizes */
+  --font-size-h1: 48px;
+  --font-size-h2: 32px;
+  --font-size-h3: 18px;
+  --font-size-subtitle: 24px;
+  --font-size-body: 16px;
+  --font-size-contact: 15px;
+  --font-size-small: 14px;
+  --font-size-pill: 12px;
+  --font-size-pill-priority: 13px;
+  --font-size-tiny: 11px;
+  --font-size-micro: 9px;
+
+  /* Typography - Weights */
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Typography - Line Heights */
+  --line-height-tight: 1.2;
+  --line-height-medium: 1.3;
+  --line-height-normal: 1.6;
+  --line-height-relaxed: 1.8;
+
+  /* Typography - Letter Spacing */
+  --letter-spacing-tight: -0.5px;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.3px;
+  --letter-spacing-wider: 0.5px;
+
+  /* Spacing - 8-point grid */
+  --space-xxs: 8px;
+  --space-xs: 16px;
+  --space-sm: 24px;
+  --space-md: 32px;
+  --space-lg: 48px;
+  --space-xl: 64px;
+  --space-xxl: 96px;
+
+  /* Z-Index Layers - Documented Hierarchy
+   *
+   * Stacking context (lowest to highest):
+   * 1. --z-content (1): Body texture overlay, base content layer
+   * 2. --z-elevated (2): Main container card
+   * 3. --z-timeline (100): Timeline dots, lines, and year markers
+   * 4. --z-overlay (9999): Dark semi-transparent background when tooltip active
+   * 5. --z-tooltip-trigger (99998): Hovered element (badge/pill/icon) rises above overlay
+   * 6. --z-tooltip-content (99999): Tooltip popup content
+   * 7. --z-tooltip-priority (999999): Recommendation tooltips (highest - prevents clipping)
+   *
+   * Why recommendation tooltips are highest:
+   * Inline recommendation pills can overlap with other tooltips in dense content.
+   * Highest z-index ensures they're always readable and never clipped.
+   */
+  --z-content: 1;
+  --z-elevated: 2;
+  --z-timeline: 100;
+  --z-overlay: 9999;
+  --z-tooltip-trigger: 99998;
+  --z-tooltip-content: 99999;
+  --z-tooltip-priority: 999999;
+
+  /* Borders & Radius */
+  --border-radius-sm: 8px;
+  --border-radius-md: 12px;
+  --border-radius-pill: 20px;
+
+  /* Shadows */
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-md: 0 2px 6px rgba(74, 95, 127, 0.15);
+  --shadow-lg: 0 4px 8px rgba(0,0,0,0.12);
+  --shadow-xl: 0 10px 60px rgba(26,26,26,0.08), 0 2px 8px rgba(26,26,26,0.04);
+
+  /* Transitions */
+  --transition-fast: 0.3s ease;
+  --transition-smooth: 0.4s ease;
+}
+
+/* ==================== RESET & BASE ==================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-stack);
+    background: linear-gradient(135deg, var(--color-warm-white) 0%, var(--color-stone) 100%);
+    color: var(--color-ink-black);
+    line-height: var(--line-height-normal);
+    padding: var(--space-xl) var(--space-md);
+    position: relative;
+}
+
+/* Subtle texture overlay */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.01) 2px,
+            rgba(0,0,0,0.01) 4px
+        );
+    pointer-events: none;
+    z-index: var(--z-content);
+}
+
+/* ==================== CONTAINER ==================== */
+/*
+ * Main content container - card-style layout
+ *
+ * Features:
+ * - Max-width: 1000px (optimal reading width)
+ * - Centered with auto margins
+ * - White background with subtle shadow (card effect)
+ * - Brand-colored accent border on top (::before pseudo-element)
+ * - Z-index: 2 (elevated above body texture)
+ * - Border-radius: 12px (rounded corners)
+ *
+ * Responsive: Reduced padding on mobile (96px→48px)
+ */
+.container {
+    max-width: 1000px;
+    margin: 0 auto;
+    background: var(--color-pure-white);
+    padding: var(--space-xxl);
+    box-shadow: var(--shadow-xl);
+    border-radius: var(--border-radius-md);
+    position: relative;
+    z-index: var(--z-elevated);
+}
+
+/* Subtle accent border */
+.container::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg,
+        var(--color-warm-copper) 0%,
+        var(--color-slate-blue) 50%,
+        var(--color-warm-copper) 100%
+    );
+    border-radius: 12px 12px 0 0;
+}
+
+/* ==================== LOGOS AND BADGES SECTION ==================== */
+.logos-badges-section {
+    padding: 26px 0;
+    margin: 0;
+    border-bottom: 2px solid transparent;
+    background: linear-gradient(#FFFFFF, #FFFFFF) padding-box,
+                linear-gradient(90deg, var(--color-warm-copper), var(--color-slate-blue)) border-box;
+    border-image-slice: 1;
+}
+
+.logos-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 48px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* ==================== BADGES & CERTIFICATIONS ==================== */
+/*
+ * Certification badges display
+ *
+ * Two locations:
+ * 1. Header section: .certifications-badges (currently hidden via display: none)
+ * 2. Logos section: .certifications-badges-inline (visible, displayed in row)
+ *
+ * Badge types:
+ * - Microsoft Fabric Analytics Engineer Associate
+ * - Power BI certification
+ *
+ * Features:
+ * - Hover scale effect (1.1x zoom)
+ * - Tooltip with certification details
+ * - Responsive sizing (clamp values)
+ */
+
+/* Base badge styles (shared by both header and logos section) */
+.cert-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xxs);
+}
+
+.badge-shield {
+    width: clamp(60px, 8vw, 100px);
+    height: auto;
+    transition: transform var(--transition-fast);
+    position: relative;
+}
+
+.badge-shield:hover {
+    transform: scale(1.1);
+}
+
+/* Logos section positioning */
+.certifications-badges-inline {
+    display: flex;
+    flex-direction: row;
+    gap: clamp(32px, 5vw, 64px);
+    align-items: center;
+    justify-content: center;
+}
+
+/* Badge link wrapper for positioning */
+.certifications-badges a {
+    position: relative;
+    display: inline-block;
+}
+
+/* Badge hover z-index elevation */
+.certifications-badges .tooltip:hover {
+    z-index: var(--z-tooltip-trigger);
+}
+
+/* Hide the original header badges */
+header .certifications-badges {
+    display: none;
+}
+
+/* ==================== PRO BONO GRID ==================== */
+/*
+ * Interactive pro bono project cards with icon and tooltip system
+ *
+ * Structure:
+ * - .pro-bono-grid: 3-column grid container (responsive to 1 column on mobile)
+ * - .pro-bono-card: Individual card with icon, title, and year
+ * - .pro-bono-tooltip: Enhanced tooltip with project details
+ *
+ * Features:
+ * - Hover tooltips appear above cards (similar to badge system)
+ * - SVG placeholder icons (jade green, warm copper, slate blue)
+ * - Card hover effects (scale, shadow enhancement)
+ * - Z-index elevation on hover (above overlay)
+ * - Responsive layout (stacks on mobile)
+ */
+
+.pro-bono-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-lg);
+    margin: var(--space-lg) 0;
+}
+
+.pro-bono-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-md);
+    background: linear-gradient(135deg, #FFFFFF 0%, #FAF8F5 100%);
+    border: 2px solid var(--color-pebble);
+    border-radius: var(--border-radius-md);
+    cursor: help;
+    transition: all var(--transition-smooth);
+    text-align: center;
+}
+
+.pro-bono-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+    border-color: var(--color-warm-copper);
+    z-index: var(--z-tooltip-trigger);
+}
+
+.pro-bono-icon-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+    position: relative;
+}
+
+.pro-bono-icon-wrapper img {
+    transition: transform var(--transition-smooth);
+}
+
+.pro-bono-card:hover img {
+    transform: scale(1.1);
+}
+
+.pro-bono-icon-wrapper h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-ink-black);
+    margin: 0;
+}
+
+.pro-bono-icon-wrapper h3::before {
+    display: none;
+}
+
+.pro-bono-year {
+    font-size: 13px;
+    color: var(--color-taupe);
+    font-weight: 500;
+    margin: 0;
+}
+
+/* Pro Bono Tooltip Styling - Positioned Below Cards */
+.pro-bono-tooltip {
+    width: 480px !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    padding: var(--space-md) !important;
+    position: absolute !important;
+    top: 110% !important;
+    bottom: auto !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+}
+
+/* Arrow pointing up to card */
+.pro-bono-tooltip::after {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent transparent #FFFFFF transparent;
+    margin: 0;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (pro-bono tooltips appear below) */
+.pro-bono-tooltip::before {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 20px;
+    background: transparent;
+}
+
+.pro-bono-tooltip strong {
+    font-size: 16px !important;
+    color: var(--color-warm-copper) !important;
+    display: block;
+    margin-bottom: var(--space-xs);
+}
+
+.pro-bono-tooltip .job-meta {
+    font-size: 12px;
+    color: var(--color-taupe);
+    font-style: italic;
+}
+
+.pro-bono-tooltip ul li {
+    margin-bottom: 8px;
+}
+
+.pro-bono-tooltip ul li:last-child {
+    margin-bottom: 0;
+}
+
+/* Pro Bono Recommendation Pill Positioning */
+.pro-bono-recommendation {
+    position: absolute;
+    bottom: 155px;
+    right: -75px;
+    pointer-events: auto;
+    z-index: var(--z-tooltip-priority);
+}
+
+/* Add pro bono cards to overlay trigger list */
+.container:has(.pro-bono-card:hover)::after,
+.container:has(.pro-bono-recommendation:hover)::after {
+    opacity: 1;
+}
+
+/* ==================== TYPOGRAPHY ==================== */
+h1 {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 2px;
+    background: linear-gradient(135deg, #555555 0%, var(--color-slate-blue) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.subtitle {
+    font-size: 24px;
+    color: var(--color-warm-copper);
+    margin-bottom: 4px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.contact {
+    font-size: 15px;
+    color: var(--color-slate-blue);
+    line-height: 1.8;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: var(--space-sm);
+    align-items: center;
+}
+
+.contact-separator {
+    color: #E8E6E3;
+    font-weight: 300;
+}
+
+.contact a {
+    color: var(--color-slate-blue);
+    text-decoration: none;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.contact a::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 2px;
+    background: var(--color-warm-copper);
+    transition: width 0.3s ease;
+}
+
+.contact a:hover::after {
+    width: 100%;
+}
+
+.contact a:hover {
+    color: var(--color-warm-copper);
+}
+
+/* ==================== HEADER ==================== */
+/*
+ * CV header with name, title, contact info, and LinkedIn icon
+ *
+ * Structure:
+ * - Name (h1) with LinkedIn icon inline
+ * - Subtitle (role/title)
+ * - Contact info (email, phone, location) with separators
+ * - Badge positioning (top-right, currently hidden)
+ * - Bottom border with brand gradient
+ *
+ * LinkedIn icon:
+ * - Inline SVG with hover color change (.linkedin-bg fill)
+ * - Kept inline (not extracted) due to complex hover behavior
+ * - Hover: Background changes from blue to warm copper
+ *
+ * Responsive: Mobile adjustments for badge positioning
+ */
+header {
+    margin-bottom: 20px;
+    padding-bottom: 25px;
+    border-bottom: 2px solid transparent;
+    background: linear-gradient(#FFFFFF, #FFFFFF) padding-box,
+                linear-gradient(90deg, var(--color-warm-copper), var(--color-slate-blue)) border-box;
+    border-image-slice: 1;
+    border-bottom: 2px solid;
+    border-image-source: linear-gradient(90deg, var(--color-warm-copper), var(--color-slate-blue));
+    position: relative;
+    overflow: visible;
+}
+
+/* Header-specific badge positioning */
+.certifications-badges {
+    position: absolute;
+    top: clamp(16px, 2%, 24px);
+    right: clamp(16px, 2%, 24px);
+    display: flex;
+    gap: clamp(8px, 1vw, 12px);
+    align-items: flex-start;
+}
+
+/* LinkedIn icon in header */
+.linkedin-icon {
+    display: inline-flex;
+    align-items: center;
+    transition: transform var(--transition-fast);
+    cursor: pointer !important;
+}
+
+.linkedin-icon:hover {
+    transform: scale(1.1);
+}
+
+.linkedin-icon svg {
+    width: 36px;
+    height: 36px;
+    transition: transform var(--transition-fast);
+    margin-top: 2px;
+}
+
+/* LinkedIn background colour change on hover */
+.linkedin-bg {
+    transition: fill var(--transition-fast);
+}
+
+.linkedin-icon:hover .linkedin-bg {
+    fill: var(--color-warm-copper);
+}
+
+/* Keep the "in" white always */
+.linkedin-in {
+    fill: white;
+}
+
+.badge-logo {
+    width: 60px;
+    height: auto;
+}
+
+/* ==================== KEYWORD PILLS ==================== */
+/*
+ * Skill and keyword display pills with tooltips
+ *
+ * Pill variants:
+ * - .technical: Technical skills (warm copper gradient) - tools, technologies, platforms
+ * - .soft: Soft skills (slate blue gradient) - leadership, collaboration, communication
+ * - .soft.priority: Emphasized leadership skills (larger, bolder)
+ * - .soft.inverted: Most important skills (solid blue background, white text)
+ * - .technical.inverted: Most important technical skills (solid copper, white text)
+ * - .recommendation: Tiny superscript pills linking to LinkedIn recommendations
+ *
+ * Features:
+ * - Hover tooltips with skill context/examples
+ * - Hover scale and shadow enhancement
+ * - Z-index elevation on hover (appears above overlay)
+ * - Responsive sizing (smaller on mobile)
+ */
+.keywords-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: var(--space-sm);
+    position: relative;
+}
+
+.keyword-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+    position: relative;
+}
+
+/* Only the hovered pill appears above the overlay */
+.keyword-pill.tooltip:hover {
+    z-index: var(--z-tooltip-trigger);
+}
+
+.keyword-pill.technical {
+    background: linear-gradient(135deg, #B8794E15 0%, #B8794E25 100%);
+    color: var(--color-warm-copper);
+    border: 1px solid #B8794E40;
+}
+
+.keyword-pill.soft {
+    background: linear-gradient(135deg, #4A5F7F15 0%, #4A5F7F25 100%);
+    color: var(--color-slate-blue);
+    border: 1px solid #4A5F7F40;
+}
+
+/* Emphasis for EL1-relevant leadership skills */
+.keyword-pill.soft.priority {
+    font-size: 13px;
+    padding: 7px 16px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #4A5F7F20 0%, #4A5F7F35 100%);
+    border: 1.5px solid #4A5F7F60;
+    box-shadow: 0 2px 6px rgba(74, 95, 127, 0.15);
+}
+
+/* Inverted styling for most important pills */
+.keyword-pill.soft.inverted {
+    background: linear-gradient(135deg, var(--color-slate-blue) 0%, #5A7FA0 100%);
+    color: white;
+    border: 1px solid var(--color-slate-blue);
+    box-shadow: 0 3px 8px rgba(74, 95, 127, 0.25);
+}
+
+.keyword-pill.technical.inverted {
+    background: linear-gradient(135deg, var(--color-warm-copper) 0%, #C9895E 100%);
+    color: white;
+    border: 1px solid var(--color-warm-copper);
+    box-shadow: 0 3px 8px rgba(184, 121, 78, 0.25);
+}
+
+.keyword-pill:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+}
+
+.keyword-pill.soft.priority:hover {
+    box-shadow: 0 4px 10px rgba(74, 95, 127, 0.25);
+}
+
+.keyword-pill.soft.inverted:hover {
+    box-shadow: 0 5px 12px rgba(74, 95, 127, 0.35);
+}
+
+.keyword-pill.technical.inverted:hover {
+    box-shadow: 0 5px 12px rgba(184, 121, 78, 0.35);
+}
+
+/* ==================== OVERLAY EFFECTS ==================== */
+/*
+ * Dark overlay effect:
+ * When any tooltip is hovered, a semi-transparent dark overlay
+ * appears over the entire page, focusing attention on the tooltip.
+ *
+ * Implementation uses :has() pseudo-class (modern browsers only).
+ * Triggers: .tooltip:hover, .keyword-pill:hover, .linkedin-icon:hover, .ai-tools-icons:hover
+ */
+.container::after {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+    z-index: var(--z-overlay);
+    opacity: 0;
+    transition: opacity var(--transition-smooth);
+}
+
+/* Activate overlay when any tooltip hovered */
+.container:has(.certifications-badges .tooltip:hover)::after,
+.container:has(.keyword-pill:hover):not(:has(.client-engagement-card .keyword-pill:hover))::after,
+.container:has(.recommendation-pill-external:hover)::after,
+.container:has(.linkedin-icon:hover)::after,
+.container:has(.ai-tools-icons:hover)::after,
+.container:has(.timeline-flag.has-tooltip:hover)::after,
+body:has(.certifications-badges-inline .tooltip:hover) .container::after {
+    opacity: 1;
+}
+
+/* Separate overlay trigger for client-engagement-card recommendations - JS controlled */
+body.client-card-tooltip-active .container::after {
+    opacity: 1;
+}
+
+/* ==================== SECTIONS ==================== */
+section {
+    margin-bottom: 0px;
+    padding: 0;
+    background: transparent;
+    position: relative;
+}
+
+/* Newspaper-style layout for Professional Summary and AI Philosophy */
+.newspaper-layout {
+    position: relative;
+    display: block;
+    margin-bottom: var(--space-xl);
+}
+
+.newspaper-layout .professional-summary {
+    position: relative;
+    z-index: var(--z-content);
+    margin-top: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.newspaper-layout .professional-summary h2 {
+    font-size: 32px;
+    margin-bottom: 12px;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.newspaper-layout .professional-summary h2::before {
+    display: none;
+}
+
+.newspaper-layout .professional-summary h2::after {
+    display: none;
+}
+
+.newspaper-layout .professional-summary p {
+    font-size: 16px;
+    line-height: 1.8;
+    background: transparent;
+    position: relative;
+    z-index: 0;
+}
+
+/* Featured callout section (AI Philosophy) - Full blue with white text */
+.ai-philosophy-wrapper {
+    display: flex;
+    align-items: start;
+    gap: 40px;
+    margin: 0 0 0 auto;
+    max-width: 90%;
+    position: relative;
+}
+
+section.featured-callout {
+    padding: 20px 32px;
+    background: linear-gradient(135deg, var(--color-slate-blue) 0%, #5A7FA0 100%);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(74, 95, 127, 0.3);
+    z-index: var(--z-content);
+    position: relative;
+    flex: 1;
+}
+
+section.featured-callout h2 {
+    color: #FFFFFF;
+    background: none;
+    -webkit-text-fill-color: #FFFFFF;
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 12px;
+    font-weight: 400;
+}
+
+section.featured-callout h2::before {
+    display: none;
+}
+
+section.featured-callout h2::after {
+    display: none;
+}
+
+.ai-tools-icons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 8px;
+    background: #FFFFFF;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    position: relative;
+    cursor: help;
+    margin-top: 40px;
+    margin-right: auto;
+    transform: translateX(-40px);
+}
+
+.ai-tools-icons:hover {
+    z-index: var(--z-tooltip-trigger);
+}
+
+.ai-tools-icons svg {
+    width: 24px;
+    height: 24px;
+    opacity: 1;
+    transition: all 0.3s ease;
+}
+
+.ai-tools-icons svg:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.ai-tools-separator {
+    width: 20px;
+    height: 1px;
+    background: rgba(0, 0, 0, 0.1);
+    margin: 4px 0;
+}
+
+/* AI Workflow Tooltip */
+.ai-workflow-tooltip {
+    visibility: hidden;
+    opacity: 0;
+    position: fixed;
+    left: 120%;
+    top: 50%;
+    transform: translateY(-50%);
+    background: linear-gradient(135deg, #FFFFFF 0%, #FAF8F5 100%);
+    color: #1A1A1A;
+    padding: var(--space-sm);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    width: 650px;
+    z-index: var(--z-tooltip-priority);
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    border: 2px solid var(--color-warm-copper);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.workflow-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.workflow-diagram {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.workflow-diagram img {
+    width: 100%;
+    height: auto;
+}
+
+.workflow-description {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+.workflow-description > div {
+    display: flex;
+    flex-direction: column;
+}
+
+.workflow-description h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-slate-blue);
+}
+
+.workflow-description h4::before {
+    display: none;
+}
+
+.workflow-description p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #555;
+}
+
+.ai-workflow-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    margin-top: -8px;
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent #FFFFFF transparent transparent;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (AI workflow tooltip appears to the right) */
+.ai-workflow-tooltip::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 100px;
+    background: transparent;
+}
+
+.ai-tools-icons:hover .ai-workflow-tooltip {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.ai-workflow-tooltip h3 {
+    margin: 0 0 16px 0;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--color-slate-blue);
+    text-align: center;
+}
+
+.ai-workflow-tooltip h3::before {
+    display: none;
+}
+
+.workflow-pyramid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: var(--space-xs);
+    position: relative;
+    width: 100%;
+}
+
+.workflow-pyramid-top {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--space-lg);
+    position: relative;
+    z-index: var(--z-content);
+}
+
+.workflow-pyramid-base {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 320px;
+    position: relative;
+    z-index: var(--z-content);
+}
+
+.workflow-step {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    position: relative;
+}
+
+.workflow-step-horizontal {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    position: relative;
+}
+
+.workflow-icon {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    opacity: 1;
+}
+
+.workflow-text {
+    display: inline;
+    background: none;
+}
+
+.workflow-text strong {
+    display: inline;
+    color: #888;
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 24px;
+    background: none;
+}
+
+.workflow-text p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.workflow-blurb {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #555;
+    margin: 12px 0;
+    text-align: left;
+}
+
+.workflow-separator {
+    border-top: 1px solid #E8E6E3;
+    margin: var(--space-xs) 0;
+}
+
+.workflow-validation {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    align-items: center;
+}
+
+section.featured-callout p {
+    color: #FFFFFF;
+    line-height: 1.5;
+    font-size: 15px;
+}
+
+h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: var(--space-md);
+    background: linear-gradient(135deg, #555555 0%, var(--color-slate-blue) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #E8E6E3;
+    position: relative;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Section header icons */
+h2 .section-icon {
+    width: 40px;
+    height: 40px;
+    margin-right: 4px;
+    flex-shrink: 0;
+    display: inline-block;
+    vertical-align: middle;
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+/* Subtle hover effect on section headers with icons */
+h2:has(.section-icon):hover .section-icon {
+    transform: translateY(-2px) scale(1.05);
+    filter: brightness(1.1);
+}
+
+h2::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-warm-copper), var(--color-slate-blue));
+    transition: width 0.8s ease;
+}
+
+h2:hover::after,
+section:hover h2::after {
+    width: 100%;
+}
+
+h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+    margin-top: var(--space-md);
+    color: var(--color-slate-blue);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+h3::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    background: var(--color-warm-copper);
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.6;
+        transform: scale(1.2);
+    }
+}
+
+.job-meta {
+    font-size: 14px;
+    color: #9B9490;
+    margin-bottom: var(--space-sm);
+    font-weight: 600;
+    font-style: italic;
+    padding-left: 16px;
+    border-left: 3px solid #E8E6E3;
+}
+
+/* ==================== CONTENT ==================== */
+p {
+    margin-bottom: var(--space-sm);
+    line-height: 1.6;
+    color: #1A1A1A;
+}
+
+ul {
+    list-style: none;
+    margin-bottom: var(--space-md);
+}
+
+li {
+    position: relative;
+    padding-left: 32px;
+    margin-bottom: var(--space-xs);
+    line-height: 1.6;
+}
+
+li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 6px;
+    height: 6px;
+    background: var(--color-warm-copper);
+    border-radius: 50%;
+}
+
+/* ==================== HIGHLIGHTS ==================== */
+strong {
+    color: #2C3E50;
+    font-weight: 700;
+    padding: 0;
+    background: transparent;
+}
+
+.metric {
+    display: inline-block;
+    color: var(--color-warm-copper);
+    font-weight: 700;
+    padding: 2px 8px;
+    background: #B8794E15;
+    border-radius: 4px;
+    border: 1px solid #B8794E30;
+}
+
+/* ==================== CLIENT ENGAGEMENT CARDS ==================== */
+/*
+ * Client engagement detail cards within experience entries
+ *
+ * Variants:
+ * - Default: Slate blue left border, light gradient background
+ * - .government: Darker blue border (#2C3E50), specialized government styling
+ *
+ * Features:
+ * - Hover effect: Slides right (4px), enhances shadow, changes border color
+ * - Left-side colored accent bar (4px solid)
+ * - Subtle gradient background
+ * - Contains: Client logo, engagement details, outcomes, metrics
+ *
+ * Visual hierarchy:
+ * - Default border: Slate blue → Warm copper on hover
+ * - Government border: Dark blue (#2C3E50) → Darker blue (#34495E) on hover
+ */
+.client-engagement-card {
+    margin-bottom: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, #F8F9FA 0%, #FFFFFF 100%);
+    border-left: 4px solid var(--color-slate-blue);
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.client-engagement-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    transform: translateX(4px);
+    border-left-color: var(--color-warm-copper);
+}
+
+.client-engagement-card.government {
+    border-left-color: #2C3E50;
+    background: linear-gradient(135deg, #F0F4F8 0%, #FFFFFF 100%);
+}
+
+.client-engagement-card.government:hover {
+    border-left-color: #34495E;
+}
+
+.client-engagement-card.government::before {
+    content: "🏛️ Government/Public Sector";
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #2C3E50;
+    background: #E8EDF2;
+    padding: 4px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.client-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2C3E50;
+    margin-bottom: var(--space-xxs);
+    display: block;
+}
+
+.client-engagement-card.government .client-name {
+    color: #1A2332;
+}
+
+.client-description {
+    color: #1A1A1A;
+    line-height: 1.7;
+    margin: 0;
+    font-size: 15px;
+}
+
+/* Special styling for Revenite section */
+.revenite-clients {
+    margin-top: var(--space-xs);
+}
+
+.revenite-clients > li {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 0;
+}
+
+.revenite-clients > li::before {
+    display: none;
+}
+
+/* ==================== LINKS ==================== */
+a {
+    color: var(--color-slate-blue);
+    text-decoration: none;
+    position: relative;
+    transition: color 0.3s ease;
+}
+
+a:hover {
+    color: var(--color-warm-copper);
+}
+
+/* ==================== SKILLS SECTION ==================== */
+.skills-section ul {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+}
+
+.skills-section li {
+    padding: var(--space-sm);
+    background: transparent;
+    border-left: 4px solid var(--color-warm-copper);
+    border-radius: 0;
+}
+
+.skills-section li::before {
+    content: "";
+    display: none;
+}
+
+/* ==================== TIMELINE ==================== */
+/*
+ * Career timeline visualization for Experience section
+ *
+ * Structure:
+ * - Vertical line (3px copper) on left side
+ * - Timeline dots at each experience entry
+ * - Year labels positioned to the left of the line
+ * - Country flags marking geographical transitions
+ *
+ * Visual hierarchy:
+ * - Current role: Filled dot with copper border
+ * - Past roles: White dot with copper border
+ * - Z-index ensures dots appear above timeline line
+ *
+ * Responsive:
+ * - Mobile: Compressed spacing, smaller dots (12px), adjusted positioning
+ * - Desktop: Full spacing, 16px dots
+ */
+.career-timeline {
+    position: relative;
+    margin: 0 0 var(--space-md) 0;
+    padding: var(--space-md) 0;
+}
+
+.timeline-container {
+    position: relative;
+    padding-left: 100px;
+}
+
+.timeline-line {
+    position: absolute;
+    left: 60px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--color-warm-copper);
+}
+
+.timeline-item {
+    position: relative;
+    margin-bottom: 12px;
+    padding-left: 24px;
+}
+
+.timeline-dot {
+    position: absolute;
+    left: -47px;
+    top: 8px;
+    width: 16px;
+    height: 16px;
+    background: #FFFFFF;
+    border: 3px solid var(--color-warm-copper);
+    border-radius: 50%;
+    z-index: var(--z-elevated);
+    transition: all 0.3s ease;
+}
+
+.timeline-item.current .timeline-dot {
+    background: #FFFFFF;
+    border-color: var(--color-warm-copper);
+    box-shadow: 0 0 0 4px rgba(184, 121, 78, 0.2);
+}
+
+.timeline-item.hide-dot .timeline-dot {
+    display: none;
+}
+
+.timeline-year {
+    position: absolute;
+    left: -118px;
+    top: 4px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-slate-blue);
+    width: 50px;
+    text-align: right;
+}
+
+/* Country flag markers on timeline */
+.timeline-flag {
+    position: absolute;
+    left: -58px;
+    width: 48px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-warm-white);
+    border-radius: 4px;
+    z-index: var(--z-elevated);
+    cursor: default;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, z-index 0s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    padding: 3px;
+}
+
+.timeline-flag:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(74, 95, 127, 0.4);
+}
+
+.timeline-flag img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 2px;
+    pointer-events: none;
+}
+
+.timeline-flag.has-tooltip {
+    position: relative;
+    cursor: pointer;
+}
+
+.timeline-flag .tooltiptext {
+    visibility: hidden;
+    width: 320px;
+    background: linear-gradient(135deg, #FFFFFF 0%, #FAF8F5 100%);
+    color: #1A1A1A;
+    text-align: left;
+    border-radius: 8px;
+    padding: var(--space-xs);
+    position: absolute;
+    left: 50px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: var(--z-tooltip-content);
+    opacity: 0;
+    transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    border: 2px solid var(--color-warm-copper);
+    pointer-events: none;
+    white-space: normal;
+}
+
+.timeline-flag .tooltiptext::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    margin-top: -8px;
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent #FFFFFF transparent transparent;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (timeline tooltips appear to the right) */
+.timeline-flag .tooltiptext::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    transform: translateY(-50%);
+    width: 60px;
+    height: 60px;
+    background: transparent;
+}
+
+.timeline-flag .tooltiptext strong {
+    color: var(--color-warm-copper);
+    background: transparent;
+    padding: 0;
+    display: block;
+    margin-bottom: var(--space-xxs);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.timeline-flag.has-tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Only the hovered flag appears above the overlay */
+.timeline-flag.has-tooltip:hover {
+    z-index: var(--z-tooltip-trigger);
+}
+
+/* Simple tooltip wrapper - contains flag and positions tooltip */
+.flag-tooltip-wrapper {
+    position: absolute;
+    left: -58px;
+}
+
+.flag-tooltip-wrapper .timeline-flag {
+    position: relative;
+    left: 0;
+    cursor: pointer;
+}
+
+.flag-tooltip-wrapper .simple-tooltiptext {
+    visibility: hidden;
+    background-color: rgba(26, 26, 26, 0.9);
+    color: #FAF8F5;
+    text-align: left;
+    border-radius: 6px;
+    padding: 8px 12px;
+    position: absolute;
+    left: 60px;
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    font-size: 13px;
+    font-style: italic;
+    opacity: 0;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    z-index: 10000;
+    pointer-events: none;
+}
+
+.flag-tooltip-wrapper:hover .simple-tooltiptext {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (simple tooltip appears to the right) */
+.flag-tooltip-wrapper .simple-tooltiptext::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    transform: translateY(-50%);
+    width: 70px;
+    height: 40px;
+    background: transparent;
+}
+
+/* ==================== COMPANY LOGOS ==================== */
+.company-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: var(--space-xxs);
+    cursor: pointer;
+    user-select: none;
+}
+
+.company-header > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
+}
+
+.company-header h3.job-title {
+    margin-top: 0;
+    margin-bottom: 0;
+    line-height: 1.2;
+    font-size: 18px;
+}
+
+.company-header h3.job-title::before {
+    display: none;
+}
+
+.company-details {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+.company-name {
+    font-weight: 600;
+    color: var(--color-slate-blue);
+    font-style: normal;
+}
+
+.job-meta {
+    margin-bottom: 0;
+    padding-left: 0;
+    border-left: none;
+    font-size: 13px;
+    color: #9B9490;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.3;
+}
+
+.company-logo {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.company-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 4px;
+}
+
+/* ==================== ACCORDION ==================== */
+/*
+ * Experience section collapsible accordion
+ *
+ * Behavior:
+ * - Click company header OR toggle arrow to expand/collapse
+ * - Multiple sections can be open simultaneously
+ * - JavaScript adds/removes .expanded class on .experience-content
+ * - JavaScript adds/removes .active class on .accordion-toggle
+ *
+ * States:
+ * - Collapsed: max-height: 0, opacity: 0 (hidden)
+ * - Expanded: max-height: 5000px, opacity: 1 (visible)
+ * - Toggle icon rotates 180° when active
+ *
+ * Print behavior:
+ * Print CSS forces all sections expanded (max-height: none !important)
+ */
+.experience-item {
+    margin-bottom: 0;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.experience-header {
+    position: relative;
+    padding-right: 40px;
+}
+
+.accordion-toggle {
+    position: absolute;
+    right: 0;
+    top: 8px;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: 2px solid #E8E6E3;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: #9B9490;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.accordion-toggle:hover {
+    border-color: var(--color-warm-copper);
+    color: var(--color-warm-copper);
+    background: rgba(184, 121, 78, 0.05);
+}
+
+.accordion-toggle.active {
+    background: var(--color-warm-copper);
+    border-color: var(--color-warm-copper);
+    color: #FFFFFF;
+    transform: rotate(180deg);
+}
+
+.experience-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, opacity 0.3s ease, margin-top 0.3s ease;
+    opacity: 0;
+}
+
+.experience-content.expanded {
+    max-height: 5000px;
+    opacity: 1;
+    margin-top: var(--space-xs);
+    overflow: visible;
+}
+
+.experience-item h3 {
+    margin-bottom: var(--space-xxs);
+}
+
+.experience-item .job-meta {
+    margin-bottom: 0;
+}
+
+/* Role progression list - tighter spacing, aligned with other bullets */
+.role-progression-list {
+    margin: 8px 0 16px 0;
+}
+
+.role-progression-list li {
+    margin-bottom: 2px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    /* Keep the default padding-left: 32px for bullet alignment */
+}
+
+/* Client card wrapper - positions recommendation pill outside the card */
+.client-card-wrapper {
+    position: relative;
+    margin-bottom: 20px;
+    margin-top: 12px; /* Space for the pill above */
+}
+
+.client-card-wrapper .recommendation-pill-external {
+    position: absolute !important;
+    top: -15px !important;
+    right: 0 !important;
+    left: auto !important;
+    z-index: 1; /* Low default - only elevate on hover */
+}
+
+.client-card-wrapper .client-engagement-card {
+    margin-bottom: 0;
+    position: relative; /* Keep for internal elements but wrapper is the positioning context for pill */
+}
+
+/* Ensure recommendation tooltips work properly when external */
+.client-card-wrapper .recommendation-pill-external:hover {
+    z-index: var(--z-tooltip-priority);
+}
+
+.client-card-wrapper .recommendation-pill-external:hover .tooltiptext {
+    z-index: var(--z-tooltip-priority);
+}
+
+/* ==================== FOOTER ==================== */
+footer {
+    margin-top: 64px;
+    padding-top: 48px;
+    border-top: 2px solid;
+    border-image-source: linear-gradient(90deg, var(--color-warm-copper), var(--color-slate-blue));
+    border-image-slice: 1;
+    text-align: center;
+    font-size: 13px;
+    color: #9B9490;
+}
+
+footer p {
+    margin-bottom: var(--space-xxs);
+}
+
+/* ==================== PRINT STYLES ==================== */
+/*
+ * Print-optimized CSS for professional PDF output
+ *
+ * Key adjustments:
+ * - Remove decorative elements: shadows, gradients, background textures
+ * - Force all accordions expanded (max-height: none !important)
+ * - Flatten colors: Convert links to black, remove hover effects
+ * - Page break controls: Avoid breaking inside sections, after headings
+ * - Hide interactive elements: Accordion toggles, tooltips
+ * - Clean layout: Remove border radius, reduce padding
+ *
+ * Usage: File → Print → Save as PDF
+ * Result: Clean, professional, single or multi-page PDF
+ */
+@media print {
+    body {
+        background: white;
+        padding: 0;
+    }
+
+    body::before {
+        display: none;
+    }
+
+    .container {
+        box-shadow: none;
+        padding: var(--space-md);
+        max-width: 100%;
+        border-radius: 0;
+    }
+
+    .container::before {
+        display: none;
+    }
+
+    section {
+        page-break-inside: avoid;
+    }
+
+    h2 {
+        page-break-after: avoid;
+    }
+
+    a {
+        color: #1A1A1A;
+        text-decoration: none;
+    }
+
+    .keyword-pill {
+        box-shadow: none;
+        border: 1px solid;
+    }
+
+    /* Expand all accordions for print */
+    .experience-content {
+        max-height: none !important;
+        opacity: 1 !important;
+        margin-top: 16px !important;
+    }
+
+    .accordion-toggle {
+        display: none;
+    }
+
+    .timeline-line {
+        background: #E8E6E3;
+    }
+
+    .company-logo {
+        box-shadow: none;
+        border: 1px solid #E8E6E3;
+    }
+}
+
+/* ==================== RESPONSIVE ==================== */
+/*
+ * Mobile-optimized layout (screens ≤768px)
+ *
+ * Consolidated mobile breakpoint for all responsive adjustments:
+ * - Typography: Reduced font sizes (h1: 48px→36px, h2: 32px→24px)
+ * - Layout: Reduced padding, stacked elements
+ * - Badges: Smaller size (100px→50px), reduced gaps
+ * - Pills: Smaller font (12px→11px), tighter spacing
+ * - Timeline: Compressed spacing, smaller dots (16px→12px)
+ * - Tooltips: Narrower width (380px→280px)
+ * - AI workflow: Hidden (too large for mobile)
+ * - LinkedIn hint: Hidden
+ *
+ * Breakpoint: 768px (tablet portrait and below)
+ * Design approach: Mobile-friendly while maintaining readability
+ */
+@media (max-width: 768px) {
+    body {
+        padding: var(--space-sm);
+    }
+
+    .container {
+        padding: var(--space-lg);
+        border-radius: 8px;
+    }
+
+    h1 {
+        font-size: 36px;
+    }
+
+    h2 {
+        font-size: 24px;
+    }
+
+    h3 {
+        font-size: 18px;
+    }
+
+    .keywords-container {
+        gap: 6px;
+    }
+
+    .keyword-pill {
+        font-size: 11px;
+        padding: 5px 12px;
+    }
+
+    .certifications-badges {
+        top: 10px;
+        right: 10px;
+        gap: 6px;
+    }
+
+    .badge-shield {
+        width: 50px;
+    }
+
+    .linkedin-hint {
+        display: none !important;
+    }
+
+    /* Logos and badges section mobile */
+    .logos-badges-section {
+        padding: 19px 0;
+    }
+
+    .logos-container {
+        gap: 32px;
+    }
+
+    .certifications-badges-inline {
+        gap: 12px;
+    }
+
+    .certifications-badges-inline .badge-shield {
+        width: 50px;
+    }
+
+    /* Stack newspaper layout on mobile */
+    .newspaper-layout .professional-summary {
+        margin-bottom: var(--space-sm);
+    }
+
+    .newspaper-layout .professional-summary h2 {
+        font-size: 24px;
+    }
+
+    .newspaper-layout .professional-summary p {
+        font-size: 15px;
+    }
+
+    section.featured-callout {
+        padding: var(--space-sm);
+        max-width: 100%;
+    }
+
+    section.featured-callout h2 {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        font-size: 22px;
+    }
+
+    .ai-tools-icons svg,
+    .ai-tools-icons img {
+        width: 28px;
+        height: 28px;
+    }
+
+    .ai-workflow-tooltip {
+        display: none;
+    }
+
+    .ai-philosophy-wrapper {
+        align-items: flex-start;
+    }
+
+    /* Timeline mobile adjustments */
+    .timeline-container {
+        padding-left: 80px;
+    }
+
+    .timeline-year {
+        left: -95px;
+        font-size: 12px;
+        width: 40px;
+    }
+
+    .timeline-dot {
+        left: 16px;
+        width: 12px;
+        height: 12px;
+        border-width: 2px;
+    }
+
+    .timeline-line {
+        left: 46px;
+    }
+
+    .timeline-flag {
+        left: 35px;
+        width: 28px;
+        height: 28px;
+        padding: 4px;
+    }
+
+    .timeline-flag .tooltiptext {
+        width: 240px;
+        font-size: 12px;
+        left: 30px;
+    }
+
+    /* Company logo mobile adjustments */
+    .company-logo {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        font-size: 20px;
+    }
+
+    /* Tooltip mobile adjustments */
+    .tooltip .tooltiptext {
+        width: 280px;
+        margin-left: -140px;
+        font-size: 12px;
+    }
+
+    .linkedin-tooltip {
+        width: 180px !important;
+    }
+
+    /* Pro Bono Grid Mobile */
+    .pro-bono-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-md);
+    }
+
+    .pro-bono-card {
+        padding: var(--space-sm);
+    }
+
+    .pro-bono-icon-wrapper img {
+        width: 70px;
+        height: 70px;
+    }
+
+    .pro-bono-icon-wrapper h3 {
+        font-size: 16px;
+    }
+
+    .pro-bono-tooltip {
+        width: 90vw !important;
+        max-width: 340px !important;
+        max-height: none !important;
+        padding: var(--space-sm) !important;
+        overflow-y: visible !important;
+    }
+
+    .pro-bono-tooltip strong {
+        font-size: 14px !important;
+    }
+
+    .pro-bono-tooltip ul {
+        font-size: 11px !important;
+    }
+}
+
+/* ==================== ACCESSIBILITY ==================== */
+/*
+ * Accessibility enhancements and WCAG compliance
+ *
+ * Features:
+ * 1. Reduced motion support: Respects user's prefers-reduced-motion setting
+ *    - Disables/minimizes animations and transitions
+ *    - Stops h3::before animation
+ *
+ * 2. Focus indicators: Clear visual focus states for keyboard navigation
+ *    - Links: 2px slate blue outline with offset
+ *    - Keyword pills: Same outline style
+ *
+ * 3. Tooltip accessibility: cursor: help on hover elements indicates more info available
+ *
+ * 4. Semantic HTML: Proper use of header, section, article tags (in HTML)
+ *
+ * 5. ARIA labels: Added to icon links for screen reader context (in HTML)
+ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    h3::before {
+        animation: none;
+    }
+}
+
+/* Focus styles for accessibility */
+a:focus,
+.keyword-pill:focus {
+    outline: 2px solid var(--color-slate-blue);
+    outline-offset: 2px;
+}
+
+/* ==================== TOOLTIPS ==================== */
+/*
+ * Unified tooltip system used throughout the CV
+ *
+ * Tooltip types:
+ * 1. Badge tooltips: Certification details (appear above, centered)
+ * 2. Pill tooltips: Skill context and examples (appear above, centered)
+ * 3. LinkedIn card: Profile preview (appears right, vertically centered)
+ * 4. AI tools icons: Workflow diagram (custom positioning)
+ * 5. Recommendation pills: LinkedIn recommendations (highest z-index)
+ *
+ * Structure:
+ * - .tooltip: Wrapper on trigger element (position: relative)
+ * - .tooltiptext: Hidden popup (position: absolute, initially visibility: hidden)
+ * - ::after: Arrow pointer triangle
+ *
+ * Interaction:
+ * - Hover shows tooltip (visibility: visible, opacity: 1)
+ * - Hovered element rises to z-index: 99998 (above overlay)
+ * - Tooltip content at z-index: 99999
+ * - Dark overlay appears on body (.container::after, opacity: 1)
+ *
+ * Responsive:
+ * - Mobile: Narrower tooltips (280px), adjusted positioning
+ * - Desktop: Full width (380px)
+ */
+.tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+
+/* Override cursor for RECOMMENDATION pill - no question mark pointer */
+.tooltip.keyword-pill.recommendation {
+    cursor: default;
+    font-size: 7px;
+    padding: 2px 4px;
+    vertical-align: super;
+    font-weight: 400;
+    margin-left: 2px;
+    margin-right: 2px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    /* Override h2's transparent text colour */
+    -webkit-text-fill-color: currentColor;
+    background: linear-gradient(135deg, #4A5F7F15 0%, #4A5F7F25 100%);
+    color: var(--color-slate-blue);
+    border: 1px solid #4A5F7F40;
+    line-height: 1;
+    position: relative;
+    z-index: var(--z-tooltip-priority);
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 380px;
+    background: linear-gradient(135deg, #FFFFFF 0%, #FAF8F5 100%);
+    color: #1A1A1A;
+    text-align: left;
+    border-radius: 8px;
+    padding: var(--space-xs);
+    position: absolute;
+    z-index: var(--z-tooltip-content);
+    top: 50%;
+    right: 110%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    border: 2px solid var(--color-warm-copper);
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+}
+
+.tooltip .tooltiptext::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 100%;
+    margin-top: -8px;
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent transparent transparent #FFFFFF;
+}
+
+/* Pill-specific tooltips - appear above */
+.keyword-pill.tooltip .tooltiptext {
+    position: absolute;
+    bottom: 140%;
+    left: 50%;
+    right: auto;
+    top: auto;
+    transform: translateX(-50%);
+    width: 420px;
+    z-index: var(--z-tooltip-content);
+}
+
+.keyword-pill.tooltip .tooltiptext::after {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-color: #FFFFFF transparent transparent transparent;
+    margin: 0;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (pill tooltips appear above) */
+.keyword-pill.tooltip .tooltiptext::before {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 20px;
+    background: transparent;
+}
+
+/* Co-Design tooltip with Double Diamond diagram - appears BELOW, larger */
+.codesign-tooltip .codesign-tooltiptext {
+    width: 54vw !important;
+    max-width: 960px !important;
+    /* Override the default "above" positioning to appear below */
+    bottom: auto !important;
+    top: calc(100% + 12px) !important;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Enable pointer events so tooltip stays when mouse moves to it */
+.codesign-tooltip:hover .codesign-tooltiptext {
+    pointer-events: auto;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap */
+.codesign-tooltip .codesign-tooltiptext::before {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 20px;
+    background: transparent;
+}
+
+/* Arrow points UP (tooltip below pill) */
+.codesign-tooltip .codesign-tooltiptext::after {
+    top: auto !important;
+    bottom: 100% !important;
+    left: 50%;
+    transform: translateX(-50%);
+    border-color: transparent transparent #FFFFFF transparent !important;
+}
+
+.codesign-diagram {
+    background: var(--color-warm-white);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+    border: 1px solid var(--color-pebble);
+}
+
+.codesign-diagram svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* Reset SVG animations on hover for replay effect */
+.codesign-tooltip:hover .codesign-diagram svg * {
+    animation-play-state: running;
+}
+
+@media (max-width: 768px) {
+    .codesign-tooltip .codesign-tooltiptext {
+        width: 95vw;
+        padding: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+}
+
+/* Badge tooltips in the logos section - appear above */
+.certifications-badges-inline .tooltip .tooltiptext {
+    position: absolute;
+    bottom: 140%;
+    left: 50%;
+    right: auto;
+    top: auto;
+    transform: translateX(-50%);
+    width: 380px;
+    z-index: var(--z-tooltip-content);
+}
+
+.certifications-badges-inline .tooltip .tooltiptext::after {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-color: #FFFFFF transparent transparent transparent;
+    margin: 0;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (badge tooltips appear above) */
+.certifications-badges-inline .tooltip .tooltiptext::before {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 20px;
+    background: transparent;
+}
+
+/* Custom Université de Montréal Tooltip */
+.udem-custom-tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.udem-custom-tooltip .udem-tooltiptext {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    z-index: var(--z-tooltip-content);
+    background-color: #FFFFFF;
+    color: var(--color-ink-black);
+    text-align: left;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 8px 24px rgba(26, 26, 26, 0.15);
+    border: 2px solid var(--color-warm-copper);
+    transition: opacity 0.2s, visibility 0.2s;
+    pointer-events: none;
+    white-space: normal;
+    width: 450px;
+    max-width: 90vw;
+    top: 110%;
+    bottom: auto;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.udem-custom-tooltip:hover .udem-tooltiptext {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.udem-custom-tooltip .udem-pointer {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #FFFFFF;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (UdeM tooltip appears below) */
+.udem-custom-tooltip .udem-tooltiptext::before {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 20px;
+    background: transparent;
+}
+
+/* Recommendation tooltip styling */
+.tooltip.keyword-pill.recommendation .tooltiptext {
+    width: 360px !important;
+    padding: 20px;
+    text-transform: none;
+    font-size: 13px;
+    line-height: 1.6;
+    z-index: var(--z-tooltip-priority) !important;
+    position: absolute !important;
+    bottom: 140% !important;
+    left: 50% !important;
+    right: auto !important;
+    top: auto !important;
+    transform: translateX(-50%) !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    white-space: normal !important;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext strong {
+    display: block;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-slate-blue);
+    margin-bottom: 4px;
+    letter-spacing: -0.2px;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext p em {
+    display: block;
+    font-size: 12px;
+    font-style: normal;
+    color: #A8A19E;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext p {
+    margin-bottom: 0;
+    display: block !important;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext p:last-child {
+    font-size: 13px;
+    color: #1A1A1A;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Span-based recommendation content (valid HTML inside span tooltiptext) */
+.tooltip.keyword-pill.recommendation .tooltiptext .rec-title {
+    display: block;
+    font-size: 12px;
+    color: #A8A19E;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext .rec-title em {
+    font-style: normal;
+}
+
+.tooltip.keyword-pill.recommendation .tooltiptext .rec-quote {
+    display: block;
+    font-size: 13px;
+    color: #1A1A1A;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (recommendation tooltips appear above) */
+.tooltip.keyword-pill.recommendation .tooltiptext::before {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 20px;
+    background: transparent;
+}
+
+/* Enable pointer events so tooltip stays when mouse moves to it */
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+    z-index: var(--z-tooltip-content) !important;
+    pointer-events: auto;
+}
+
+.tooltip .tooltiptext strong {
+    color: var(--color-warm-copper);
+    background: transparent;
+    padding: 0;
+    display: block;
+    margin-bottom: var(--space-xxs);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.tooltip .tooltiptext p {
+    margin-bottom: 10px;
+    color: #1A1A1A;
+    font-weight: normal;
+}
+
+.tooltip .tooltiptext p strong {
+    color: var(--color-slate-blue);
+    font-weight: 600;
+    display: inline;
+    margin-right: 4px;
+}
+
+.tooltip .tooltiptext p:last-child {
+    margin-bottom: 0;
+}
+
+.tooltip .tooltiptext .click-instruction {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #E8E6E3;
+    font-size: 11px;
+    color: var(--color-slate-blue);
+    font-style: italic;
+}
+
+/* ==================== LINKEDIN CARD TOOLTIP ==================== */
+.linkedin-card {
+    width: 400px !important;
+    padding: 0 !important;
+    border-radius: 12px !important;
+    overflow: visible !important;
+    background: #FFFFFF !important;
+    border: 2px solid var(--color-warm-copper) !important;
+    color: #1A1A1A !important;
+}
+
+.linkedin-banner {
+    width: 100%;
+    height: 100px;
+    background-size: cover;
+    background-position: center;
+    background-color: var(--color-slate-blue);
+    border-radius: 12px 12px 0 0;
+}
+
+.linkedin-profile {
+    padding: 0 20px 20px 20px;
+    position: relative;
+    color: #1A1A1A;
+}
+
+.linkedin-card p,
+.linkedin-card .linkedin-title,
+.linkedin-card .linkedin-location,
+.linkedin-card .linkedin-connections,
+.linkedin-card .linkedin-followers {
+    color: #1A1A1A !important;
+    background: none !important;
+    -webkit-text-fill-color: initial !important;
+}
+
+.linkedin-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: 4px solid #FFFFFF;
+    margin-top: -40px;
+    display: block;
+    background: #FFFFFF;
+}
+
+.linkedin-info {
+    margin-top: 12px;
+}
+
+.linkedin-card .linkedin-info h3 {
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    color: #1A1A1A !important;
+    margin: 0 0 6px 0 !important;
+    background: none !important;
+    -webkit-text-fill-color: #1A1A1A !important;
+}
+
+.linkedin-card .linkedin-info h3::before {
+    display: none !important;
+}
+
+.linkedin-card .linkedin-title {
+    font-size: 14px !important;
+    color: #1A1A1A !important;
+    margin: 0 0 6px 0 !important;
+    font-weight: 400 !important;
+    background: none !important;
+    -webkit-text-fill-color: #1A1A1A !important;
+}
+
+.linkedin-card .linkedin-location {
+    font-size: 13px !important;
+    color: #666666 !important;
+    margin: 0 0 6px 0 !important;
+    background: none !important;
+    -webkit-text-fill-color: #666666 !important;
+}
+
+.linkedin-card .linkedin-connections {
+    font-size: 13px !important;
+    color: #0A66C2 !important;
+    font-weight: 600 !important;
+    margin: 0 0 4px 0 !important;
+    -webkit-text-fill-color: #0A66C2 !important;
+    background: none !important;
+}
+
+.linkedin-card .linkedin-followers {
+    font-size: 13px !important;
+    color: #666666 !important;
+    font-weight: 400 !important;
+    margin: 0 0 16px 0 !important;
+    -webkit-text-fill-color: #666666 !important;
+    background: none !important;
+}
+
+.linkedin-cta-button {
+    padding: 10px 20px;
+    background: linear-gradient(135deg, var(--color-warm-copper) 0%, #C9895E 100%);
+    color: white !important;
+    border-radius: 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(184, 121, 78, 0.2);
+}
+
+.linkedin-cta-button span {
+    color: white !important;
+    -webkit-text-fill-color: white !important;
+}
+
+.linkedin-cta-button:hover {
+    background: linear-gradient(135deg, #A96D42 0%, var(--color-warm-copper) 100%);
+    box-shadow: 0 4px 8px rgba(184, 121, 78, 0.3);
+    transform: translateY(-1px);
+}
+
+.linkedin-icon.tooltip .tooltiptext.linkedin-card {
+    top: 50%;
+    right: auto;
+    left: auto;
+    transform: translateY(-50%);
+    margin-left: 50px;
+}
+
+.linkedin-icon.tooltip .tooltiptext.linkedin-card::after {
+    top: 50%;
+    left: -16px;
+    right: auto;
+    transform: translateY(-50%);
+    border-color: transparent #FFFFFF transparent transparent;
+    border-width: 8px;
+}
+
+/* Invisible bridge to prevent tooltip disappearing when crossing gap (LinkedIn tooltip appears to the right) */
+.linkedin-icon.tooltip .tooltiptext.linkedin-card::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    transform: translateY(-50%);
+    width: 60px;
+    height: 100px;
+    background: transparent;
+}
+
+/* Only the hovered LinkedIn icon appears above the overlay */
+.linkedin-icon.tooltip:hover {
+    z-index: var(--z-tooltip-trigger);
+}
+
+/* ==================== YMCA MODAL & CARD STACK ==================== */
+.tooltip.keyword-pill.recommendation.ymca-trigger {
+    cursor: pointer;
+}
+
+.tooltip.keyword-pill.recommendation.ymca-trigger:hover {
+    background: linear-gradient(135deg, #4A5F7F25 0%, #4A5F7F35 100%);
+}
+
+.ymca-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(26, 26, 26, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    overflow: hidden;
+}
+
+.ymca-modal-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.ymca-modal-content {
+    background: var(--color-pure-white);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 900px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+}
+
+.ymca-modal-overlay.active .ymca-modal-content {
+    transform: translateY(0);
+}
+
+.ymca-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--color-pebble);
+}
+
+.ymca-modal-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-ink-black);
+}
+
+.ymca-modal-subtitle {
+    font-size: 14px;
+    color: var(--color-warm-grey);
+    margin-top: 4px;
+}
+
+.ymca-close-btn {
+    background: var(--color-stone);
+    border: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 20px;
+    color: var(--color-warm-grey);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.ymca-close-btn:hover {
+    background: var(--color-pebble);
+    color: var(--color-ink-black);
+}
+
+.ymca-recommendation-layout {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 32px;
+    align-items: start;
+}
+
+@media (max-width: 768px) {
+    .ymca-recommendation-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.ymca-coordinator-section {
+    background: var(--color-stone);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.ymca-coordinator-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--color-warm-copper);
+    margin-bottom: 12px;
+}
+
+.ymca-coordinator-image {
+    width: 100%;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.ymca-kids-section {
+    position: relative;
+}
+
+.ymca-kids-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--color-slate-blue);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ymca-card-counter {
+    background: var(--color-slate-blue);
+    color: var(--color-pure-white);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+}
+
+.ymca-card-stack-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    overflow: hidden;
+}
+
+.ymca-card-stack {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    perspective: 1000px;
+    cursor: pointer;
+}
+
+.ymca-card {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--color-pure-white);
+}
+
+.ymca-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: var(--color-pure-white);
+}
+
+.ymca-card:nth-child(1) { z-index: 11; }
+.ymca-card:nth-child(2) { z-index: 10; transform: translateY(8px) scale(0.97); opacity: 0.8; }
+.ymca-card:nth-child(3) { z-index: 9; transform: translateY(16px) scale(0.94); opacity: 0.6; }
+.ymca-card:nth-child(4) { z-index: 8; transform: translateY(24px) scale(0.91); opacity: 0.4; }
+.ymca-card:nth-child(5) { z-index: 7; transform: translateY(32px) scale(0.88); opacity: 0.3; }
+.ymca-card:nth-child(6) { z-index: 6; transform: translateY(40px) scale(0.85); opacity: 0.2; }
+.ymca-card:nth-child(7) { z-index: 5; transform: translateY(48px) scale(0.82); opacity: 0.15; }
+.ymca-card:nth-child(8) { z-index: 4; transform: translateY(56px) scale(0.79); opacity: 0.1; }
+.ymca-card:nth-child(9) { z-index: 3; transform: translateY(64px) scale(0.76); opacity: 0.08; }
+.ymca-card:nth-child(10) { z-index: 2; transform: translateY(72px) scale(0.73); opacity: 0.05; }
+.ymca-card:nth-child(11) { z-index: 1; transform: translateY(80px) scale(0.70); opacity: 0.03; }
+
+.ymca-card.moving-to-back {
+    animation: ymcaSendToBack 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes ymcaSendToBack {
+    0% {
+        transform: translateY(0) scale(1);
+        z-index: 12;
+    }
+    30% {
+        transform: translateY(-20px) translateX(30px) scale(1.02) rotateY(-5deg);
+        z-index: 12;
+    }
+    70% {
+        transform: translateY(60px) translateX(60px) scale(0.8) rotateY(-10deg);
+        opacity: 0.5;
+        z-index: 0;
+    }
+    100% {
+        transform: translateY(80px) scale(0.70);
+        opacity: 0.03;
+        z-index: 0;
+    }
+}
+
+.ymca-click-hint {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--color-warm-grey);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.ymca-click-hint svg {
+    width: 16px;
+    height: 16px;
+    animation: ymcaBounce 2s infinite;
+}
+
+@keyframes ymcaBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+/* ==================== ROTATE DEVICE OVERLAY ==================== */
+/*
+ * Shows a "please rotate your device" message when viewing in portrait mode
+ * on mobile devices. Only appears on screens narrower than 768px in portrait.
+ */
+.rotate-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, var(--color-slate-blue) 0%, #3A4F6F 100%);
+    z-index: 9999999;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    text-align: center;
+    padding: var(--space-md);
+}
+
+.rotate-overlay-content {
+    color: var(--color-pure-white);
+    max-width: 300px;
+}
+
+.rotate-icon {
+    width: 80px;
+    height: 80px;
+    margin-bottom: var(--space-md);
+    animation: rotateHint 2s ease-in-out infinite;
+}
+
+.rotate-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--color-pure-white);
+}
+
+@keyframes rotateHint {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-15deg); }
+    75% { transform: rotate(15deg); }
+}
+
+.rotate-overlay h2 {
+    font-size: 24px;
+    font-weight: var(--font-weight-bold);
+    margin-bottom: var(--space-xs);
+    color: var(--color-pure-white);
+    border: none;
+    background: none;
+}
+
+.rotate-overlay h2::before,
+.rotate-overlay h2::after {
+    display: none;
+}
+
+.rotate-overlay p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.5;
+}
+
+/* Show overlay only on mobile devices in portrait orientation */
+@media screen and (max-width: 768px) and (orientation: portrait) {
+    .rotate-overlay {
+        display: flex;
+    }
+}
+</style>
+</head>
+<body>
+    <!-- Rotate Device Overlay - shown on mobile portrait -->
+    <div class="rotate-overlay">
+        <div class="rotate-overlay-content">
+            <div class="rotate-icon">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7.34 6.41L.86 12.9l6.49 6.48 6.49-6.48-6.5-6.49zM3.69 12.9l3.66-3.66L11 12.9l-3.66 3.66-3.65-3.66zm15.67-6.26A8.95 8.95 0 0 0 13 4V.76L8.76 5 13 9.24V6c1.79 0 3.58.68 4.95 2.05a7.007 7.007 0 0 1 0 9.9 6.973 6.973 0 0 1-7.79 1.44l-1.49 1.49C10.02 21.62 11.51 22 13 22c2.3 0 4.61-.88 6.36-2.64a8.98 8.98 0 0 0 0-12.72z"/>
+                </svg>
+            </div>
+            <h2>Best Viewed on Desktop</h2>
+            <p>This document has been designed to be consumed on a monitor.</p>
+            <p style="margin-top: 12px;">If viewing on mobile, please rotate to landscape mode for a better experience.</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <!-- Certification Badges -->
+            <div class="certifications-badges">
+                <!-- Fabric Analytics Engineer Associate Badge -->
+                <div class="tooltip">
+                    <a href="https://learn.microsoft.com/api/credentials/share/en-us/Steve-9449/B0B52FDADE89B96D?sharingId=9BD27A069037C937" target="_blank" rel="noopener noreferrer" aria-label="View Fabric Analytics Engineer Certification">
+                        <img class="badge-shield"
+                             src="assets/microsoft-certified-associate-badge.svg"
+                             alt="Microsoft Certified: Fabric Analytics Engineer Associate">
+                    </a>
+                    <span class="tooltiptext">
+                        <img src="assets/icon-microsoft-fabric.svg" alt="Microsoft Fabric" width="48" height="48" style="float: left; margin-right: 12px;">
+                        <strong>Microsoft Fabric Analytics Engineer<br>(DP-600)</strong>
+                        <p>Enterprise-grade exam covering end-to-end data analytics on Microsoft Fabric, including data ingestion, transformation, modelling, and semantic layer design.</p>
+                        <p><strong>Why I completed it:</strong> To validate expertise in Microsoft's latest unified analytics platform and demonstrate commitment to cutting-edge cloud data engineering.</p>
+                        <p><strong>What this means for you:</strong> I can architect scalable, production-ready analytics solutions using the most current Microsoft technologies, reducing risk and accelerating delivery.</p>
+                        <p class="click-instruction">Click the badge to view my certificate</p>
+                    </span>
+                </div>
+
+                <!-- Power BI Data Analyst Associate Badge -->
+                <div class="tooltip">
+                    <a href="https://learn.microsoft.com/api/credentials/share/en-us/Steve-9449/571F2ABA07837C11?sharingId=9BD27A069037C937" target="_blank" rel="noopener noreferrer" aria-label="View Power BI Data Analyst Certification">
+                        <img class="badge-shield"
+                             src="assets/power-bi-badge.png"
+                             alt="Microsoft Certified: Power BI Data Analyst Associate">
+                    </a>
+                    <span class="tooltiptext">
+                        <img src="assets/icon-power-bi.svg" alt="Power BI" width="48" height="48" style="float: left; margin-right: 12px;">
+                        <strong>Power BI Data Analyst<br>(PL-300)</strong>
+                        <p>Comprehensive certification validating advanced Power BI skills including DAX, Power Query, data modelling, visualisation design, and enterprise deployment.</p>
+                        <p><strong>Why I completed it:</strong> To prove deep technical competency in Power BI and establish credibility with clients seeking certified expertise.</p>
+                        <p><strong>What this means for you:</strong> I can deliver high-performance, best-practice Power BI solutions that meet Microsoft standards and drive measurable business outcomes.</p>
+                        <p class="click-instruction">Click the badge to view my certificate</p>
+                    </span>
+                </div>
+
+                <!-- Education Badge - Université de Montréal -->
+                <div class="tooltip udem-badge">
+                    <img class="badge-shield"
+                         src="assets/universite-de-montreal.svg"
+                         alt="Université de Montréal">
+                    <span class="tooltiptext">
+                        <img src="assets/universite-de-montreal.svg" alt="Université de Montréal" width="48" height="48" style="float: left; margin-right: 12px;">
+                        <strong>Bachelor of Science in Mathematics</strong>
+                        <p>Université de Montréal | 2006</p>
+                        <p><strong>Foundation:</strong> Strong mathematical and analytical foundation supporting advanced statistical modelling, data analysis, and problem-solving capabilities.</p>
+                        <p><strong>Why it matters:</strong> Mathematical training enables deep understanding of statistical methods, algorithms, and data structures essential for modern analytics engineering.</p>
+                    </span>
+                </div>
+            </div>
+
+            <h1>
+                Steve Gosselin
+                <a href="https://www.linkedin.com/in/steve-gosselin-353b7885/" target="_blank" rel="noopener noreferrer" class="linkedin-icon tooltip" aria-label="LinkedIn Profile">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                        <rect width="24" height="24" rx="2" fill="var(--color-slate-blue)" class="linkedin-bg"/>
+                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452z" fill="white" class="linkedin-in"/>
+                    </svg>
+                    <span class="tooltiptext linkedin-card">
+                        <div class="linkedin-banner" style="background-image: url('assets/linkedin-banner.jpg');"></div>
+                        <div class="linkedin-profile">
+                            <img src="assets/linkedin-photo.jpg" alt="Steve Gosselin" class="linkedin-avatar">
+                            <div class="linkedin-info">
+                                <h3>Steve Gosselin</h3>
+                                <p class="linkedin-title">Analytics Engineer | Data Modelling</p>
+                                <p class="linkedin-location">Greater Melbourne Area</p>
+                                <p class="linkedin-connections">500+ connections</p>
+                                <p class="linkedin-followers">1.7K+ followers</p>
+                                <div class="linkedin-cta-button">
+                                    <span>Click to connect with me on LinkedIn →</span>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
+                </a>
+            </h1>
+            <p class="subtitle">Analytics Engineer — Data Modelling</p>
+            <div class="contact">
+                <a href="#" id="email-link">stv.gosselin@outlook.com</a>
+                <span class="contact-separator">•</span>
+                <span style="color: #4A5F7F; opacity: 0.6;">&lt;mobile number redacted&gt;</span>
+                <span class="contact-separator">•</span>
+                <span>Melbourne, Australia</span>
+            </div>
+            
+    <div class="keywords-container">
+      <span class="tooltip keyword-pill soft priority inverted">Stakeholder Management<span class="tooltiptext">
+        <strong>Stakeholder Management</strong>
+        <p><strong>Experience:</strong> Managing relationships across all organisational levels including C-suite executives, board members, and technical teams.</p>
+        <p><strong>Key Achievements:</strong> Maintained 100% retention rate with 5 key clients through empathetic, collaborative approach.</p>
+      </span></span><span class="tooltip keyword-pill soft priority inverted">Team Leadership<span class="tooltiptext">
+        <strong>Team Leadership</strong>
+        <p><strong>Experience:</strong> Led teams of 2-5 across analytics, R&D, and actuarial functions throughout my career.</p>
+        <p><strong>Key Achievements:</strong> Managed 3 Power BI developers at Dear Watson, led 5 actuarial staff at TD Bank as Pricing Manager, and built 2-person R&D team as Head of Research and Development.</p>
+      </span></span><span class="tooltip keyword-pill soft priority inverted">Data Strategy<span class="tooltiptext">
+        <strong>Data Strategy</strong>
+        <p><strong>Experience:</strong> Designing enterprise-grade data architectures using star schema, Kimball methodology, and medallion architecture.</p>
+        <p><strong>Key Achievements:</strong> Created AI-ready data models enabling advanced analytics and self-serve capabilities.</p>
+      </span></span><span class="tooltip keyword-pill soft priority codesign-tooltip">Co-Design<span class="tooltiptext codesign-tooltiptext">
+        <strong>Co-Design & Double Diamond</strong>
+        <p style="margin-bottom: 12px;">This double-diamond-inspired approach is my tried and tested methodology over the years. A human-centred collaborative design process that involves stakeholders throughout solution development.</p>
+        <div class="codesign-diagram">
+          <svg width="1860" height="840" viewBox="0 0 1860 840" xmlns="http://www.w3.org/2000/svg">
+            <style>
+              text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }
+              .dd-phase { font-size: 26px; font-weight: 600; fill: #1A1A1A; }
+              .dd-sub { font-size: 22px; fill: #9B9490; }
+              .dd-label { font-size: 24px; fill: #4A5F7F; }
+              .dd-small { font-size: 20px; fill: #9B9490; }
+              .dd-diamond-left { fill: #FAF8F5; stroke: #4A5F7F; stroke-width: 4; }
+              .dd-diamond-right { fill: #FAF8F5; stroke: #B8794E; stroke-width: 4; }
+              .dd-panel { fill: #FFFFFF; stroke: #E8E6E3; stroke-width: 3; }
+              .dd-alertCircle { fill: #B8736E; }
+              .dd-successCircle { fill: #5A8A6C; }
+              .dd-iconText { fill: #FFFFFF; font-size: 32px; font-weight: 700; dominant-baseline: middle; text-anchor: middle; }
+              .dd-challenge-group { opacity: 0; animation: ddFadeIn 0.4s ease-out 0s forwards; }
+              .dd-reveal-cover { fill: #FAF8F5; animation: ddSlideRight 2.3s ease-in-out 0.5s forwards; }
+              .dd-spine { stroke: #1A1A1A; stroke-width: 4; fill: none; stroke-dasharray: 1240; stroke-dashoffset: 1240; animation: ddDrawLine 1.5s ease-in-out 2.8s forwards; }
+              .dd-arrow { fill: #1A1A1A; opacity: 0; animation: ddFadeIn 0.15s ease-out 4.3s forwards; }
+              .dd-solution-group { opacity: 0; animation: ddFadeIn 0.4s ease-out 4.4s forwards; }
+              @keyframes ddFadeIn { from { opacity: 0; } to { opacity: 1; } }
+              @keyframes ddSlideRight { from { transform: translateX(0); } to { transform: translateX(1600px); } }
+              @keyframes ddDrawLine { to { stroke-dashoffset: 0; } }
+            </style>
+            <line x1="300" y1="420" x2="1540" y2="420" class="dd-spine"/>
+            <polygon points="1540,420 1510,404 1510,436" class="dd-arrow"/>
+            <polygon points="400,420 660,120 920,420 660,720" class="dd-diamond-left"/>
+            <polygon points="920,420 1180,120 1440,420 1180,720" class="dd-diamond-right"/>
+            <text x="530" y="90" text-anchor="middle" class="dd-phase">DISCOVER</text>
+            <text x="530" y="120" text-anchor="middle" class="dd-sub">(Diverge)</text>
+            <text x="530" y="404" text-anchor="middle" class="dd-label">Research</text>
+            <text x="530" y="440" text-anchor="middle" class="dd-label">Observe</text>
+            <text x="790" y="90" text-anchor="middle" class="dd-phase">DEFINE</text>
+            <text x="790" y="120" text-anchor="middle" class="dd-sub">(Converge)</text>
+            <text x="790" y="404" text-anchor="middle" class="dd-label">Define problem</text>
+            <text x="790" y="440" text-anchor="middle" class="dd-label">Success criteria</text>
+            <text x="1050" y="90" text-anchor="middle" class="dd-phase">DEVELOP</text>
+            <text x="1050" y="120" text-anchor="middle" class="dd-sub">(Diverge)</text>
+            <text x="1050" y="404" text-anchor="middle" class="dd-label">Prototype</text>
+            <text x="1050" y="440" text-anchor="middle" class="dd-label">Iterate</text>
+            <text x="1310" y="90" text-anchor="middle" class="dd-phase">DELIVER</text>
+            <text x="1310" y="120" text-anchor="middle" class="dd-sub">(Converge)</text>
+            <text x="1310" y="404" text-anchor="middle" class="dd-label">Validate</text>
+            <text x="1310" y="440" text-anchor="middle" class="dd-label">Release</text>
+            <rect x="300" y="0" width="1240" height="840" class="dd-reveal-cover"/>
+            <g class="dd-challenge-group">
+              <rect x="40" y="300" width="260" height="240" rx="16" class="dd-panel"/>
+              <text x="170" y="390" text-anchor="middle" class="dd-phase">CHALLENGE</text>
+              <text x="170" y="430" text-anchor="middle" class="dd-small">Don't Know</text>
+              <text x="170" y="460" text-anchor="middle" class="dd-small">Could Be</text>
+              <circle cx="316" cy="288" r="28" class="dd-alertCircle"/>
+              <text x="316" y="290" class="dd-iconText">?</text>
+            </g>
+            <g class="dd-solution-group">
+              <rect x="1540" y="300" width="260" height="240" rx="16" class="dd-panel"/>
+              <text x="1670" y="390" text-anchor="middle" class="dd-phase">SOLUTION</text>
+              <text x="1670" y="430" text-anchor="middle" class="dd-small">Do Know</text>
+              <text x="1670" y="460" text-anchor="middle" class="dd-small">Should Be</text>
+              <circle cx="1816" cy="288" r="28" class="dd-successCircle"/>
+              <text x="1816" y="290" class="dd-iconText">✓</text>
+            </g>
+          </svg>
+        </div>
+        <p style="margin-top: 12px;"><strong>Impact:</strong> Ensures solutions remain relevant, usable, and trusted; drives long-term client partnerships.</p>
+        <p style="margin-top: 8px; font-style: italic; color: var(--color-warm-copper);"><a href="#" id="codesign-email-link" style="color: var(--color-warm-copper); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;">Let's have a chat</a> to see how we could use this to solve your problems.</p>
+      </span></span><span class="tooltip keyword-pill soft priority">Human-Centred Approach<span class="tooltiptext">
+        <strong>Human-Centred Approach</strong>
+        <p><strong>Philosophy:</strong> Prioritising UX principles and user adoption in all analytics solutions.</p>
+        <p><strong>Key Achievements:</strong> Achieved 90%+ adoption rate on reports through user-focused design.</p>
+      </span></span><span class="tooltip keyword-pill technical inverted">Power BI<span class="tooltiptext">
+        <strong>Power BI - Expert Level</strong>
+        <p><strong>Experience:</strong> 4+ years across 30+ client engagements.</p>
+        <p><strong>Key Achievements:</strong> Created 70+ production reports with 90%+ adoption rates.</p>
+        <p><strong>Certifications:</strong> Microsoft Certified Power BI Data Analyst Associate (PL-300)</p>
+      </span></span><span class="tooltip keyword-pill technical inverted">Microsoft Fabric<span class="tooltiptext">
+        <strong>Microsoft Fabric - Expert Level</strong>
+        <p><strong>Experience:</strong> Enterprise-grade data analytics on unified platform including OneLake, Dataflow Gen2, Spark Notebooks.</p>
+        <p><strong>Key Achievements:</strong> Implemented medallion architectures with delta tables and parquet files.</p>
+        <p><strong>Certifications:</strong> Microsoft Certified Fabric Analytics Engineer Associate (DP-600)</p>
+      </span></span><span class="tooltip keyword-pill technical inverted">Data Modelling<span class="tooltiptext">
+        <strong>Data Modelling - Expert Level</strong>
+        <p><strong>Expertise:</strong> Star schema design, Kimball methodology, semantic models, tabular models.</p>
+        <p><strong>Key Achievements:</strong> Designed scalable architectures reducing complexity across diverse industries.</p>
+      </span></span><span class="tooltip keyword-pill technical inverted">Agentic AI<span class="tooltiptext">
+        <strong>Agentic AI - Practical Application</strong>
+        <p><strong>Tools:</strong> Claude Code paired with VS Code; GitHub/Azure DevOps for version control; AI-generated SVG assets for custom report visuals.</p>
+        <p><strong>Productivity:</strong> Achieve in 1 hour what traditionally takes 1 day through AI-assisted development and automation.</p>
+      </span></span><span class="tooltip keyword-pill technical">DAX & M<span class="tooltiptext">
+        <strong>DAX & Power Query (M) - Expert Level</strong>
+        <p><strong>DAX:</strong> Advanced calculations, time intelligence, performance optimization, complex measures. DAX Studio for query optimization and performance tuning.</p>
+        <p><strong>Power Query (M):</strong> Custom functions, complex transformations, REST API integration. Built automated vendor comparison tool saving 2-3 hours daily.</p>
+      </span></span><span class="tooltip keyword-pill technical">SQL & Python<span class="tooltiptext">
+        <strong>SQL & Python - Proficient</strong>
+        <p><strong>SQL:</strong> T-SQL, query optimization, stored procedures, SQL Server integration for data extraction, transformation, and integration across enterprise systems.</p>
+        <p><strong>Python:</strong> Data analysis with Pandas, NumPy; PySpark for big data processing. Spark Notebooks in Microsoft Fabric, data transformations, automation.</p>
+      </span></span><span class="tooltip keyword-pill technical">Advanced Analytics<span class="tooltiptext">
+        <strong>Advanced Analytics - Expert Level</strong>
+        <p><strong>Statistical Modelling:</strong> Generalised Linear Models (GLMs), survival analysis, Markov chain models, probability theory, time series analysis.</p>
+        <p><strong>Simulation & Forecasting:</strong> Monte Carlo simulations for scenario modelling and risk assessment, predictive analytics for workforce planning and financial projections.</p>
+        <p><strong>Actuarial Methods:</strong> Life contingencies, mortality and morbidity rates, recovery probabilities, portfolio profitability analysis, customer lifecycle transitions.</p>
+        <p><strong>Foundation:</strong> Rigorous actuarial exam series (SOA Associate) and B.Sc. Mathematics.</p>
+      </span></span>
+    </div>
+
+        </header>
+
+        <!-- Logos and Badges Section -->
+        <section class="logos-badges-section">
+            <div class="logos-container">
+                <!-- Certification Badges -->
+                <div class="certifications-badges-inline">
+                    <!-- Fabric Analytics Engineer Associate Badge -->
+                    <div class="tooltip">
+                        <a href="https://learn.microsoft.com/api/credentials/share/en-us/Steve-9449/B0B52FDADE89B96D?sharingId=9BD27A069037C937" target="_blank" rel="noopener noreferrer" aria-label="View Fabric Analytics Engineer Certification">
+                            <img class="badge-shield"
+                                 src="assets/microsoft-certified-associate-badge.svg"
+                                 alt="Microsoft Certified: Fabric Analytics Engineer Associate">
+                        </a>
+                        <span class="tooltiptext">
+                            <img src="assets/icon-microsoft-fabric.svg" alt="Microsoft Fabric" width="48" height="48" style="float: left; margin-right: 12px;">
+                            <strong>Microsoft Fabric Analytics Engineer<br>(DP-600)</strong>
+                            <p>Enterprise-grade exam covering end-to-end data analytics on Microsoft Fabric, including data ingestion, transformation, modelling, and semantic layer design.</p>
+                            <p><strong>Why I completed it:</strong> To validate expertise in Microsoft's latest unified analytics platform and demonstrate commitment to cutting-edge cloud data engineering.</p>
+                            <p><strong>What this means for you:</strong> I can architect scalable, production-ready analytics solutions using the most current Microsoft technologies, reducing risk and accelerating delivery.</p>
+                            <p class="click-instruction">Click the badge to view my certificate</p>
+                        </span>
+                    </div>
+
+                    <!-- Power BI Data Analyst Associate Badge -->
+                    <div class="tooltip">
+                        <a href="https://learn.microsoft.com/api/credentials/share/en-us/Steve-9449/571F2ABA07837C11?sharingId=9BD27A069037C937" target="_blank" rel="noopener noreferrer" aria-label="View Power BI Data Analyst Certification">
+                            <img class="badge-shield"
+                                 src="assets/power-bi-badge.png"
+                                 alt="Microsoft Certified: Power BI Data Analyst Associate">
+                        </a>
+                        <span class="tooltiptext">
+                            <img src="assets/icon-power-bi.svg" alt="Power BI" width="48" height="48" style="float: left; margin-right: 12px;">
+                            <strong>Power BI Data Analyst<br>(PL-300)</strong>
+                            <p>Comprehensive certification validating advanced Power BI skills including DAX, Power Query, data modelling, visualisation design, and enterprise deployment.</p>
+                            <p><strong>Why I completed it:</strong> To prove deep technical competency in Power BI and establish credibility with clients seeking certified expertise.</p>
+                            <p><strong>What this means for you:</strong> I can deliver high-performance, best-practice Power BI solutions that meet Microsoft standards and drive measurable business outcomes.</p>
+                            <p class="click-instruction">Click the badge to view my certificate</p>
+                        </span>
+                    </div>
+
+                    <!-- Education Badge - Université de Montréal -->
+                    <div class="tooltip udem-custom-tooltip">
+                        <img class="badge-shield"
+                             src="assets/universite-de-montreal.svg"
+                             alt="Université de Montréal">
+                        <span class="udem-tooltiptext">
+                            <div class="udem-pointer"></div>
+                            <img src="assets/universite-de-montreal_icon.svg" alt="Université de Montréal" width="60" height="60" style="float: left; margin-right: 12px; object-fit: contain;">
+                            <strong>Bachelor of Science in Mathematics</strong>
+                            <p>Université de Montréal | 2006</p>
+
+                            <div style="clear: both; margin-top: 16px; padding-top: 16px; border-top: 2px solid #E8E6E3;">
+                                <p><strong>Actuarial Credentials:</strong></p>
+                                <div style="display: flex; gap: 24px; margin: 12px 0; align-items: center;">
+                                    <div style="flex: 1;">
+                                        <img src="assets/cia_logo.svg" alt="Canadian Institute of Actuaries" style="width: auto; height: 48px; display: block; margin-bottom: 8px; object-fit: contain;">
+                                        <span style="font-size: 12px; font-weight: bold;">CIA Associate</span> <span style="font-size: 11px; font-style: italic;">2015-2018</span>
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <img src="assets/soa-logo.png" alt="Society of Actuaries" style="width: auto; height: 48px; display: block; margin-bottom: 8px; object-fit: contain;">
+                                        <span style="font-size: 12px; font-weight: bold;">SOA Associate</span> <span style="font-size: 11px; font-style: italic;">2009-2018</span>
+                                    </div>
+                                </div>
+                                <p><strong>What this means:</strong> I completed a rigorous actuarial exam series (probability, statistics, financial mathematics, life contingencies) demonstrating advanced quantitative analysis, risk assessment, and statistical modelling capabilities. This actuarial foundation combined with my mathematical training provides exceptional analytical rigour for data engineering and business intelligence work.</p>
+                            </div>
+
+                            <p style="margin-top: 12px;"><strong>Career Pivot:</strong> I transitioned from the insurance/actuarial sector to data analytics and business intelligence, applying my mathematical and statistical expertise to modern analytics engineering, data modelling, and decision support systems.</p>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <main>
+            <div class="newspaper-layout">
+                <section class="professional-summary"><h2>More About Me</h2>
+<p>I'm a data strategy specialist with deep expertise in <strong>enterprise-grade data modelling</strong> using Power BI and Microsoft Fabric. I design scalable semantic models and architectures that <strong>reduce complexity and strengthen decision-making</strong> across diverse industries. I maintain long-term client partnerships through <strong>co-design and human-centred approaches</strong> that keep solutions relevant, usable, and trusted.</p>
+</section>
+                <div class="ai-philosophy-wrapper">
+                    <div class="ai-tools-icons">
+                        <!-- Claude Code -->
+                        <img src="assets/icon-claude-code.svg" alt="Claude Code" width="24" height="24">
+                        <!-- VS Code -->
+                        <img src="assets/icon-vscode.svg" alt="VS Code" width="24" height="24">
+                        <!-- GitHub -->
+                        <img src="assets/icon-github.svg" alt="GitHub" width="24" height="24">
+                        <span class="ai-tools-separator"></span>
+                        <!-- ChatGPT -->
+                        <img src="assets/icon-chatgpt.svg" alt="ChatGPT" width="24" height="24">
+                        <!-- Gemini -->
+                        <img src="assets/icon-gemini.svg" alt="Gemini" width="24" height="24">
+
+                        <!-- Workflow Tooltip -->
+                        <div class="ai-workflow-tooltip">
+                            <h3>My Method & Workflow</h3>
+
+                            <div class="workflow-content">
+                                <!-- AI Method Diagram -->
+                                <div class="workflow-diagram">
+                                    <img src="assets/my_ai_method.svg" alt="My AI Method & Workflow" style="width: 100%; height: auto;">
+                                </div>
+
+                                <!-- Description -->
+                                <div class="workflow-description">
+                                    <div>
+                                        <h4>Ideate</h4>
+                                        <p>Explore possibilities and generate innovative solutions through AI-assisted brainstorming with Claude Code in VS Code.</p>
+                                    </div>
+                                    <div>
+                                        <h4>Create</h4>
+                                        <p>Build and implement solutions with rapid prototyping, leveraging AI to accelerate development and maintain quality.</p>
+                                    </div>
+                                    <div>
+                                        <h4>Orchestrate</h4>
+                                        <p>Coordinate version control and manage the continuous development loop with Git to ensure traceability and collaboration.</p>
+                                    </div>
+                                    <div>
+                                        <h4>Calibrate</h4>
+                                        <p>Validate approaches using ChatGPT and Gemini for independent perspectives and strategic refinement before committing.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <section class="featured-callout">
+                        <h2>My AI Philosophy</h2>
+<p>I believe in embracing AI as a powerful tool that <strong style="color: #FFFFFF;">must be guided with care, ethics, and business maturity</strong>. At this stage of the technology (January 2026), AI amplifies human capability rather than replacing it. The person directing the AI needs deep domain knowledge to validate outputs, catch errors, and ensure solutions serve real needs. I've seen firsthand how thoughtful AI adoption can achieve <strong style="color: #FFFFFF;">10x productivity gains</strong>, but only when humans remain accountable for quality, security, and ethical outcomes. I mentor colleagues on this balanced approach: use AI to accelerate work, but never abdicate judgement or responsibility. This perspective will likely evolve as the technology matures, which is why I stay actively engaged with developments in the field.</p>
+</section>
+                </div>
+            </div>
+            <section><h2><img src="assets/icon-experience.svg" alt="" class="section-icon">Professional Experience</h2>
+
+<div class="career-timeline">
+    <div class="timeline-container">
+        <div class="timeline-line"></div>
+
+        <!-- Revenite (2025-Present) -->
+        <div class="timeline-item current">
+            <div class="timeline-year">2025</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo revenite"><img src="assets/experience_revenite.png" alt="Revenite"></div>
+                        <div>
+                            <h3 class="job-title">Senior Consultant – Data &amp; Analytics</h3>
+                            <div class="company-details">
+                                <span class="company-name">Revenite</span>
+                                <span>|</span>
+                                <span class="job-meta">February 2025 - Present</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle active">▼</div>
+                </div>
+                <div class="experience-content expanded">
+                    <p>I strengthen analytics capability across strategy, architecture, and delivery with emphasis on co-design, adoption, and reusable frameworks that scale beyond individual projects. I work directly with senior stakeholders, translate ambiguity into structure, and deliver production-grade solutions under constrained conditions. Recognised internally as bringing a fresh perspective to sales and problem-solving, I have taken ownership of revamping the UX component of the organisation's service offering.</p>
+                    <p style="margin-top: 24px; margin-bottom: 12px; font-weight: 700; font-size: 16px; color: #2C3E50;">Key Client Engagements:</p>
+                    <ul class="revenite-clients">
+                        <li>
+                            <div class="client-engagement-card government">
+                                <span class="client-name">Federal Regulatory Authority</span>
+                                <p class="client-description">I designed and delivered a highly customised analytics solution within a 2-3 month window to meet regulatory changes effective July 2025. I translated complex business rules and policy requirements into a production-ready solution under significant time pressure.</p>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-engagement-card government">
+                                <span class="client-name">Victorian Emergency Services Authority</span>
+                                <p class="client-description">I led foundational data modelling improvements and upskilled the established BI team through hands-on coaching in advanced DAX techniques and UX-driven design. I introduced a structured Power BI design framework and modernised delivery methods. Feedback from the team: "solutions that actually solve problems, not just reporting."</p>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-engagement-card">
+                                <span class="client-name">Leading Australian Research University</span>
+                                <p class="client-description">I led a UX uplift initiative to address low Power BI adoption, identifying usability issues and recommending improvements. My approach and recommendations secured additional funding for an department-wide UX transformation program.</p>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-engagement-card">
+                                <span class="client-name">Premier Medical Research Institute</span>
+                                <p class="client-description">I delivered a working financial reporting prototype to the CFO within 2 weeks, breaking a 12-month impasse. My insights gave the executive team clarity on data platform direction and enabled a strategic decision on how to resolve their reporting bottleneck.</p>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dear Watson Consulting (2022-2024) -->
+        <div class="timeline-item">
+            <div class="timeline-year">2022</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo dear-watson"><img src="assets/experience_dwc.svg" alt="Dear Watson Consulting"></div>
+                        <div>
+                            <h3 class="job-title">Reporting &amp; Analytics Lead</h3>
+                            <div class="company-details">
+                                <span class="company-name">Dear Watson Consulting</span>
+                                <span>|</span>
+                                <span class="job-meta">January 2022 - August 2024</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I rapidly progressed through three roles culminating in leading a team of 3 Power BI developers, driven by consistent value demonstrated to the CEO, exceptional client feedback, and trust earned across the organisation. I managed 30+ clients with 100% retention among key accounts, delivered 70+ reports with above-average adoption driven by genuine usefulness and UX-first design, and applied my skills across 9 sectors including banking, healthcare, retail, mining, and construction.</p>
+                    <p><strong>Role Progression:</strong></p>
+                    <ul class="content-list role-progression-list">
+                        <li><strong>Reporting &amp; Analytics Lead</strong> (April 2024 - August 2024)</li>
+                        <li><strong>Senior Power BI Consultant</strong> (February 2023 - April 2024)</li>
+                        <li><strong>Power BI Consultant</strong> (January 2022 - February 2023)</li>
+                    </ul>
+                    <p style="margin-top: 24px; margin-bottom: 12px; font-weight: 700; font-size: 16px; color: #2C3E50;">Notable Client Engagements:</p>
+                    <ul class="revenite-clients">
+                        <li>
+                            <div class="client-card-wrapper">
+                                <span class="tooltip keyword-pill soft priority recommendation recommendation-pill-external">RECOMMENDATION<span class="tooltiptext"><strong>Chary Chigurala</strong><p><em>Value Based Leadership, Harvard Business School | July 2024</em></p><p style="margin-top: 8px;">Steve has developed Power BI reports for Bild Group, demonstrating sound knowledge of the tool and maintaining a professional relationship with clients. He is pleasant to work with and scores high in integrity and problem resolution.</p></span></span>
+                                <div class="client-engagement-card">
+                                    <span class="client-name">Major Victorian Construction Group</span>
+                                    <p class="client-description">I designed and implemented a safety incident tracking system that addressed workplace hazards and contributed to reduced incident rates. I then delivered a financial projection tool providing job costing visibility across Victorian operations.</p>
+                                </div>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-card-wrapper">
+                                <span class="tooltip keyword-pill soft priority recommendation recommendation-pill-external">RECOMMENDATION<span class="tooltiptext"><strong>Ellen Badock</strong><p><em>Human Resources Professional | August 2024</em></p><p style="margin-top: 8px;">Steve created an amazing HR Metrics BI report for us which has helped HR and leaders in being able to easily access and analyse key current workforce and diversity statistics. Steve was so patient and helpful throughout the process.</p></span></span>
+                                <div class="client-engagement-card">
+                                    <span class="client-name">Global Mining Corporation</span>
+                                    <p class="client-description">I established the first Australian division Power BI solution, creating the reporting foundation for the organisation. I then trained China headquarters on Power BI best practices and data modelling, enabling international knowledge transfer.</p>
+                                </div>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-card-wrapper">
+                                <span class="tooltip keyword-pill soft priority recommendation recommendation-pill-external">RECOMMENDATION<span class="tooltiptext"><strong>Isis Abbott</strong><p><em>Transformational Leader Connecting People, Systems, and Strategy | November 2024</em></p><p style="margin-top: 8px;">I have sought Steve's help on a number of projects, including some very challenging reports to convey complicated data stories. Steve does an amazing job of making the difficult simple for users, and providing insightful recommendations for telling meaningful data stories that help drive business decisions and actions. He is commercially astute, talented, flexible and easy to work with.</p></span></span>
+                                <div class="client-engagement-card">
+                                    <span class="client-name">Leading Volume Home Builder</span>
+                                    <p class="client-description">I unlocked sales insights through complex enterprise system integration, implemented process mining for construction workflows, and built tracking solutions for material and service cost impacts during inflationary periods.</p>
+                                </div>
+                            </div>
+                        </li>
+                        <li>
+                            <div class="client-card-wrapper">
+                                <span class="tooltip keyword-pill soft priority recommendation recommendation-pill-external">RECOMMENDATION<span class="tooltiptext"><strong>Nicole Mesiti</strong><p><em>Strategic Projects &amp; Product Manager | July 2024</em></p><p style="margin-top: 8px;">Steve's ability to interpret data is second to none. His expertise in transforming raw data into meaningful insights was instrumental in the success of our project. He consistently provided valuable tips and went above and beyond in offering support.</p></span></span>
+                                <div class="client-engagement-card">
+                                    <span class="client-name">Real Estate Technology Company</span>
+                                    <p class="client-description">I created a comprehensive CRM dashboard that transformed raw data into actionable insights, enabling the organisation to make data-driven decisions on customer engagement and sales performance.</p>
+                                </div>
+                            </div>
+                        </li>
+                    </ul>
+                    <p><strong>Key Achievements:</strong></p>
+                    <ul class="content-list">
+                        <li>I built lasting client partnerships through empathetic, collaborative approaches</li>
+                        <li>I delivered Microsoft-approved trainings including "Dashboard in a Day" and "Fabric Analyst in a Day," plus advanced workshops on data modelling and visualisation</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- St Vincent's Health Australia (2021) -->
+        <div class="timeline-item">
+            <div class="timeline-year">2021</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo st-vincents"><img src="assets/experience_svha.jpg" alt="St Vincent's Health Australia"></div>
+                        <div>
+                            <h3 class="job-title">Power BI Developer</h3>
+                            <div class="company-details">
+                                <span class="company-name">St Vincent&#39;s Health Australia</span>
+                                <span>|</span>
+                                <span class="job-meta">August 2021 - December 2021</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I joined a fast-track initiative to accelerate Power BI adoption across a major healthcare organisation, working within strict governance requirements typical of clinical environments. I delivered the prototype of a financial reporting solution in collaboration with accounting leadership, prioritising user experience and clarity through International Business Communication Standards (IBCS) to ensure effective decision support for executive stakeholders.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Forensicare (2019-2021) -->
+        <div class="timeline-item">
+            <div class="timeline-year">2019</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo forensicare"><img src="assets/experience_forensicare.png" alt="Forensicare"></div>
+                        <div>
+                            <h3 class="job-title">Data Analytics &amp; Insights Manager</h3>
+                            <div class="company-details">
+                                <span class="company-name">Forensicare</span>
+                                <span>|</span>
+                                <span class="job-meta">July 2019 - August 2021</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I established data analytics capability in a newly created role, reporting to the Executive Director and supporting strategic objectives for the $515M hospital expansion. I transformed an 800-employee forensic mental health organisation from static Word reports to an automated, interactive analytics platform.</p>
+                    <p><strong>Key Outcomes:</strong></p>
+                    <ul class="content-list">
+                        <li><strong>Workplace Safety Governance:</strong> I delivered Occupational Health and Safety (OHS) analytics with dynamic row-level security (RLS), ensuring staff could only view incidents within their own ward while enabling cross-organisational pattern analysis. This contributed to a measurable reduction in staff injury rates and supported Work Health and Safety (WHS) compliance obligations.</li>
+                        <li><strong>Compliance Monitoring:</strong> I built a Learning and Development (L&D) dashboard providing board-level visibility into training compliance across the clinical workforce. <span class="tooltip keyword-pill soft priority recommendation">RECOMMENDATION<span class="tooltiptext"><strong>Felicity Donert</strong><p><em>Organisational Development | December 2022</em></p><p style="margin-top: 8px;">Steve really is a world-class powerhouse when it comes to Data Analytics. His unique ability to create 'data art', telling a story using visual representations provides organisations with a meaningful, directive which can shape business decisions. Having worked with other Analysts, Steve's intellect and mathematic genius is his unique selling point; bringing his mathematic background to the practice enables a much higher level of data integrity and understanding. Not only can Steve provide a visual representation in an easily understood and practical layout, but he also enables the user to continue his method with easily transferable data which can be updated using his templates which are custom designed to suit any organisation. As a humble colleague who puts others' needs ahead of his own, Steve is a guru in his field. Anyone working with him knows just how fortunate they are to have him on their side. I highly recommend Steve in any role he applies for, he's a true gentleman and gifted at what he does.</p></span></span></li>
+                        <li><strong>Workforce Planning:</strong> I created position establishment reporting for the Executive Director, enabling vacancy rate calculations and identifying data integrity issues in HR systems. <span class="tooltip keyword-pill soft priority recommendation">RECOMMENDATION<span class="tooltiptext"><strong>Maddy Gillbanks</strong><p><em>HR Leader & Fashion Founder | May 2022</em></p><p style="margin-top: 8px;">Steve was a highly effective and expert data wizard! Not only was he extremely dedicated and comprehensive with developing HR Data Analytics and Insights, but he was a delight to be around. A true team-player who I throughly enjoyed working with. He is an asset to any business.</p></span></span></li>
+                        <li><strong>Pandemic Response:</strong> I designed a COVID-19 vaccination tracking platform (80%+ uptake) and workforce scenario models using Monte Carlo simulation for evidence-based continuity planning.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Australian Conservation Foundation (2019) -->
+        <div class="timeline-item hide-dot">
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo acf"><img src="assets/experience_acf.png" alt="ACF"></div>
+                        <div>
+                            <h3 class="job-title">Data Consultant</h3>
+                            <div class="company-details">
+                                <span class="company-name">Australian Conservation Foundation</span>
+                                <span>|</span>
+                                <span class="job-meta">January 2019 - June 2019</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I was engaged by the CIO to establish rapid data collection and analytics capability supporting national volunteer mobilisation during a Federal Election campaign, operating under compressed timelines with geographically distributed non-technical users. I delivered a real-time progress tracking dashboard enabling campaign leadership to make strategic resource allocation decisions. I implemented data quality controls and automated validation workflows to address field data entry inconsistencies, reducing manual verification burden across 100+ volunteer collection points. <span class="tooltip keyword-pill soft priority recommendation">RECOMMENDATION<span class="tooltiptext"><strong>Tracy Bell</strong><span class="rec-title"><em>Founder @ Loopsoflearning.com.au | Change Management | PMO Management | November 2024</em></span><span class="rec-quote">Steve is an absolute PowerBi superstar! He is my absolute go to for all things PowerBi and is massively patient, great at building my capability at a basic level, while his brilliant maths brain can solve any complex problem. He would be an amazing asset to any team as not only does he improve in his own work constantly, but is so eager to bring people with him! I really miss working with Steve and would absolutely employ him again should a suitable role become available within my team!</span></span></span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Australia Migration Marker -->
+        <div class="timeline-item hide-dot" style="margin-bottom: 33.6px; margin-top: 33.6px; min-height: 38px;">
+            <div class="flag-tooltip-wrapper" style="top: -10px;">
+                <div class="timeline-flag">
+                    <img src="assets/Flag_of_Australia.svg" alt="Australia">
+                </div>
+                <span class="simple-tooltiptext">Moved to Australia to no longer have to experience Canadian winters! ❄️❄️</span>
+            </div>
+        </div>
+
+        <!-- TD Bank (2011-2018) -->
+        <div class="timeline-item">
+            <div class="timeline-year">2011</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo td-bank"><img src="assets/experience_td.png" alt="TD Bank"></div>
+                        <div>
+                            <h3 class="job-title">Pricing Manager</h3>
+                            <div class="company-details">
+                                <span class="company-name">TD Bank</span>
+                                <span>|</span>
+                                <span class="job-meta">June 2011 - March 2018</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I progressed through three roles within TD Insurance, ultimately managing pricing strategy and R&D functions for an insurance portfolio generating $50M in annual premiums.</p>
+                    <p><strong>Role Progression:</strong></p>
+                    <ul class="content-list">
+                        <li><strong>Pricing Manager</strong> (Aug 2017 - Mar 2018): I led pricing governance and rate-setting decisions, providing strategic guidance to senior leadership on risk-adjusted pricing during regulatory environment changes.</li>
+                        <li><strong>Head of Research & Development</strong> (Jul 2015 - Aug 2016): I founded and led a Finance R&D team (2 direct reports), establishing data architecture for multi-million-row claims database integration. I designed reproducible analytical frameworks that reduced ad-hoc analysis turnaround from weeks to days.</li>
+                        <li><strong>Senior Analyst</strong> (Jun 2011 - Jun 2015): I built the foundation of statistical modelling expertise including Generalised Linear Models (GLMs) and survival analysis for portfolio profitability assessment and regulatory capital requirements.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Willis Towers Watson (2006-2011) -->
+        <div class="timeline-item">
+            <div class="timeline-year">2006</div>
+            <div class="timeline-dot"></div>
+            <div class="experience-item">
+                <div class="experience-header">
+                    <div class="company-header">
+                        <div class="company-logo willis"><img src="assets/experience_wtw.png" alt="Willis Towers Watson"></div>
+                        <div>
+                            <h3 class="job-title">Creditor Insurance Consultant</h3>
+                            <div class="company-details">
+                                <span class="company-name">Willis Towers Watson</span>
+                                <span>|</span>
+                                <span class="job-meta">November 2006 - June 2011</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-toggle">▼</div>
+                </div>
+                <div class="experience-content">
+                    <p>I provided actuarial consulting services to banking and financial services clients on creditor insurance programs protecting loans and mortgages, delivering strategic recommendations on portfolio performance and regulatory reserve adequacy. I analysed claims experience and developed rate renewal recommendations for life and disability portfolios, balancing client profitability objectives with prudential risk requirements. I was recognised internally for advanced analytical tool development, building reusable Excel-based calculation frameworks adopted across consulting engagements to improve consistency and reduce delivery timelines.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Canada Career Foundation Marker -->
+        <div class="timeline-item hide-dot" style="margin-top: 24px; min-height: 38px;">
+            <div class="timeline-flag" style="top: 10px;">
+                <img src="assets/Flag_of_Canada.svg" alt="Canada">
+            </div>
+        </div>
+
+    </div>
+</div>
+
+</section><section><h2><img src="assets/icon-projects.svg" alt="" class="section-icon">Pro Bono Involvements</h2>
+<p style="margin-bottom: 24px; font-style: italic; color: #4A5F7F;">My passion for data and problem-solving not only brings me work to earn a living, but also empowers me to help people in my local community. I believe in using my skills to create meaningful impact beyond commercial projects, which is why I protect some of my time for volunteering projects that genuinely make a difference.</p>
+
+<div class="pro-bono-grid">
+    <!-- Community Incident Registry -->
+    <div class="pro-bono-card">
+        <div class="tooltip">
+            <div class="pro-bono-icon-wrapper">
+                <img src="assets/neighbourhood-watch.svg" alt="Community Registry" width="100" height="100">
+            </div>
+            <span class="tooltiptext pro-bono-tooltip">
+                <strong>Community Incident Registry &amp; Evidence Capture Platform</strong>
+                <p class="job-meta" style="margin-top: 8px; margin-bottom: 12px;">2025 | Community Initiative</p>
+                <p style="margin-bottom: 12px;">When our 100+ unit residential building faced ongoing theft incidents, police wouldn't act on isolated events - we needed data showing patterns, but residents were reporting through scattered channels making it impossible to demonstrate scale or trends.</p>
+                <p style="margin-bottom: 12px;">I designed and implemented an end-to-end incident logging and evidence management solution using the Google ecosystem. I built a zero-cost solution using Google Forms for controlled data capture, Google Apps Script for orchestration, and Google Drive for secure structured storage. I implemented automated workflows that trigger confirmation emails, create incident-specific folders, and link evidence (photos, videos, documents) to originating records. I designed email reply handling as a low-friction ingestion channel, enabling non-technical residents to contribute evidence without requiring direct Drive access, and architected a data layer with consistent identifiers, immutable submissions, timestamped events, and metadata/evidence separation.</p>
+                <p style="margin-bottom: 0;">We now have a structured dataset proving theft patterns to submit to local authorities and be taken seriously, enabling longitudinal analysis and trend detection while maintaining minimal cognitive load for contributors and preserving governance, access control, and traceability for the building committee.</p>
+            </span>
+        </div>
+    </div>
+
+    <!-- Vegan Retail Analytics -->
+    <div class="pro-bono-card">
+        <div class="tooltip">
+            <div class="pro-bono-icon-wrapper">
+                <img src="assets/Vegetarian-mark.svg" alt="Vegan Retail Analytics" width="100" height="100">
+            </div>
+            <span class="tooltiptext pro-bono-tooltip">
+                <strong>Vegan Retail Analytics Solution</strong>
+                <p class="job-meta" style="margin-top: 8px; margin-bottom: 12px;">2019 | Animal Welfare Initiative</p>
+                <p style="margin-bottom: 12px;">I delivered a comprehensive Power BI analytics solution for a local vegan retail shop, addressing inventory and sales optimization challenges while contributing to the animal welfare cause.</p>
+                <ul style="margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6;">
+                    <li>I extracted sales data via REST API using Power Query recursive functions, demonstrating advanced data integration capabilities</li>
+                    <li>I implemented calculation groups using Tabular Editor external tool to enable flexible time-based analytics and comparative reporting</li>
+                    <li>I created interactive dashboards tracking sales trends, product performance, and inventory issues, providing actionable insights for retail operations</li>
+                    <li>I delivered a professional-grade solution valued at ~$10,000 as a volunteer contribution, combining a learning opportunity with meaningful community impact</li>
+                </ul>
+            </span>
+        </div>
+        <span class="tooltip keyword-pill soft priority recommendation pro-bono-recommendation">RECOMMENDATION<span class="tooltiptext"><strong>Paul Freeman</strong><p><em>Leadership / Research / Data Analysis / Innovation | January 2022</em></p><p style="margin-top: 8px;">Steve volunteered his time to help our small plant-based business better manage our data and decision with a customer PowerBI interface that connects to our database. He is capable, honest, reliable, and I can wholeheartedly recommend him and his work.</p></span></span>
+    </div>
+
+    <!-- High School Tutoring -->
+    <div class="pro-bono-card">
+        <div class="tooltip">
+            <div class="pro-bono-icon-wrapper">
+                <img src="assets/ymca.svg" alt="High School Tutoring" width="100" height="100">
+            </div>
+            <span class="tooltiptext pro-bono-tooltip">
+                <strong>High School Homework Assistance Program</strong>
+                <p class="job-meta" style="margin-top: 8px; margin-bottom: 12px;">July 2016 - March 2018 | The YMCAs of Québec</p>
+                <p style="margin-bottom: 12px;">I volunteered as a homework tutor supporting high school students with mathematics and science coursework, making learning more accessible and engaging for reluctant teenagers.</p>
+                <ul style="margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6;">
+                    <li>I provided one-on-one and small group tutoring sessions helping students overcome academic challenges and build confidence in STEM subjects</li>
+                    <li>I adapted teaching approaches to individual learning styles, making complex concepts more approachable and reducing math anxiety</li>
+                    <li>I contributed to improved student outcomes and academic engagement through patient, encouraging mentorship</li>
+                </ul>
+            </span>
+        </div>
+        <span class="tooltip keyword-pill soft priority recommendation pro-bono-recommendation ymca-trigger" onclick="openYmcaModal()">RECOMMENDATIONS<span class="tooltiptext"><p>Click to see what these kids prepared, just before the move to Australia. (In French only)</p></span></span>
+    </div>
+</div>
+</section>
+        </main>
+
+        <footer>
+            <p>Last Updated: January 16, 2026</p>
+            <p style="margin-top: 8px; font-size: 12px;">Generated with precision and care</p>
+        </footer>
+    </div>
+
+    <script>
+        // Generate dynamic email link with campaign tracking
+        (function() {
+            const emailLink = document.getElementById('email-link');
+            if (emailLink) {
+                const date = new Date();
+                const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                const month = months[date.getMonth()];
+                const year = date.getFullYear();
+                const campaign = `cv_${month}_${year}`;
+
+                const emailAddress = `stv.gosselin+${campaign}@outlook.com`;
+                const subject = encodeURIComponent('Opportunity for Steve Gosselin');
+
+                emailLink.href = `mailto:${emailAddress}?subject=${subject}`;
+            }
+
+            // Co-Design tooltip email link
+            const codesignLink = document.getElementById('codesign-email-link');
+            if (codesignLink) {
+                const date = new Date();
+                const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                const month = months[date.getMonth()];
+                const year = date.getFullYear();
+                const campaign = `cv_codesign_${month}_${year}`;
+
+                const emailAddress = `stv.gosselin+${campaign}@outlook.com`;
+                const subject = encodeURIComponent('How can we fix my problems with the Double Diamond approach?');
+
+                codesignLink.href = `mailto:${emailAddress}?subject=${subject}`;
+            }
+        })();
+
+        // Accordion functionality for Professional Experience
+        (function() {
+            const accordionToggles = document.querySelectorAll('.accordion-toggle');
+
+            accordionToggles.forEach(toggle => {
+                // Toggle on click
+                toggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    // Navigate to the experience-item parent, then find the content
+                    const experienceItem = this.closest('.experience-item');
+                    const content = experienceItem.querySelector('.experience-content');
+                    const isExpanded = content.classList.contains('expanded');
+
+                    if (isExpanded) {
+                        content.classList.remove('expanded');
+                        this.classList.remove('active');
+                    } else {
+                        content.classList.add('expanded');
+                        this.classList.add('active');
+                    }
+                });
+
+                // Also toggle when clicking the company header
+                const experienceHeader = toggle.closest('.experience-header');
+                const companyHeader = experienceHeader.querySelector('.company-header');
+                if (companyHeader) {
+                    companyHeader.addEventListener('click', function() {
+                        toggle.click();
+                    });
+                }
+            });
+        })();
+
+        // Timeline flag tooltips are positioned via CSS (no JS needed)
+
+        // YMCA Modal and Card Stack functionality
+        (function() {
+            let ymcaCurrentCard = 0;
+            const ymcaTotalCards = 11;
+            let ymcaIsAnimating = false;
+
+            window.openYmcaModal = function() {
+                document.getElementById('ymca-modal').classList.add('active');
+                document.body.style.overflow = 'hidden';
+            };
+
+            window.closeYmcaModal = function() {
+                document.getElementById('ymca-modal').classList.remove('active');
+                document.body.style.overflow = '';
+            };
+
+            window.closeYmcaModalOnOverlay = function(event) {
+                if (event.target === document.getElementById('ymca-modal')) {
+                    closeYmcaModal();
+                }
+            };
+
+            window.cycleYmcaCards = function() {
+                if (ymcaIsAnimating) return;
+                ymcaIsAnimating = true;
+
+                const cardStack = document.getElementById('ymca-card-stack');
+                const cards = cardStack.querySelectorAll('.ymca-card');
+                const firstCard = cards[0];
+
+                firstCard.classList.add('moving-to-back');
+
+                setTimeout(() => {
+                    firstCard.classList.remove('moving-to-back');
+                    cardStack.appendChild(firstCard);
+
+                    ymcaCurrentCard = (ymcaCurrentCard + 1) % ymcaTotalCards;
+                    document.getElementById('ymca-card-counter').textContent = `${ymcaCurrentCard + 1} / ${ymcaTotalCards}`;
+
+                    ymcaIsAnimating = false;
+                }, 600);
+            };
+
+            document.addEventListener('keydown', (e) => {
+                if (document.getElementById('ymca-modal').classList.contains('active')) {
+                    if (e.key === 'Escape') {
+                        closeYmcaModal();
+                    } else if (e.key === ' ' || e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        cycleYmcaCards();
+                    }
+                }
+            });
+        })();
+    </script>
+
+    <!-- YMCA Recommendations Modal -->
+    <div class="ymca-modal-overlay" id="ymca-modal" onclick="closeYmcaModalOnOverlay(event)">
+        <div class="ymca-modal-content" onclick="event.stopPropagation()">
+            <div class="ymca-modal-header">
+                <div>
+                    <div class="ymca-modal-title">YMCA Volunteer Appreciation</div>
+                    <div class="ymca-modal-subtitle">High School Homework Assistance Program | 2016-2018</div>
+                </div>
+                <button class="ymca-close-btn" onclick="closeYmcaModal()">&times;</button>
+            </div>
+
+            <div class="ymca-recommendation-layout">
+                <!-- Coordinator Section (Left) -->
+                <div class="ymca-coordinator-section">
+                    <div class="ymca-coordinator-label">Program Coordinator</div>
+                    <img src="assets/ymca_coordinatoor.png" alt="Coordinator Recommendation" class="ymca-coordinator-image">
+                </div>
+
+                <!-- Kids Card Stack (Right) -->
+                <div class="ymca-kids-section">
+                    <div class="ymca-kids-label">
+                        Student Notes
+                        <span class="ymca-card-counter" id="ymca-card-counter">1 / 11</span>
+                    </div>
+
+                    <div class="ymca-card-stack-container">
+                        <div class="ymca-card-stack" id="ymca-card-stack" onclick="cycleYmcaCards()">
+                            <div class="ymca-card"><img src="assets/ymca_11.png" alt="Student note 11"></div>
+                            <div class="ymca-card"><img src="assets/ymca_1.png" alt="Student note 1"></div>
+                            <div class="ymca-card"><img src="assets/ymca_2.png" alt="Student note 2"></div>
+                            <div class="ymca-card"><img src="assets/ymca_3.png" alt="Student note 3"></div>
+                            <div class="ymca-card"><img src="assets/ymca_4.png" alt="Student note 4"></div>
+                            <div class="ymca-card"><img src="assets/ymca_5.png" alt="Student note 5"></div>
+                            <div class="ymca-card"><img src="assets/ymca_6.png" alt="Student note 6"></div>
+                            <div class="ymca-card"><img src="assets/ymca_7.png" alt="Student note 7"></div>
+                            <div class="ymca-card"><img src="assets/ymca_8.png" alt="Student note 8"></div>
+                            <div class="ymca-card"><img src="assets/ymca_9.png" alt="Student note 9"></div>
+                            <div class="ymca-card"><img src="assets/ymca_10.png" alt="Student note 10"></div>
+                        </div>
+                    </div>
+
+                    <div class="ymca-click-hint">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/>
+                        </svg>
+                        Click to see the next note
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Restart Double Diamond SVG animation on hover
+        document.querySelectorAll('.codesign-tooltip').forEach(tooltip => {
+            tooltip.addEventListener('mouseenter', () => {
+                const svg = tooltip.querySelector('.codesign-diagram svg');
+                if (svg) {
+                    // Clone and replace to restart all CSS animations
+                    const clone = svg.cloneNode(true);
+                    svg.parentNode.replaceChild(clone, svg);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
